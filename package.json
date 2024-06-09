@@ -8,6 +8,10 @@
     "concurrently": "^8.2.2"
   },
   "scripts": {
-    "dev": "concurrently \"yarn --cwd server dev\" \"yarn --cwd client dev\""
+    "dev": "concurrently \"yarn --cwd server dev\" \"yarn --cwd client dev\"",
+    "client:install": "cd client && yarn",
+    "client:build": "cd client && yarn build",
+    "server:install": "cd server && yarn",
+    "start": "cd server && node index.js"
   }
 }

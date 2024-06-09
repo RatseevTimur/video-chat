@@ -12,12 +12,12 @@ import mask2 from '../assets/images/glasses.png';
 import mask3 from '../assets/images/Mask.png';
 
 const masks = [
-  {url: mask1, posZ: 2, offsetY: -0.01, geometry: {x: 2, y: 1 } },
-  {url: mask2, posZ: 2, offsetY: -0.01, geometry: {x: 2, y: 1 } },
-  {url: mask3, posZ: 2, offsetY: -0.35, geometry: {x: 3, y: 3 } },
+  {url: mask1, posZ: 1.5, offsetY: -0.01, geometry: {x: 2, y: 1 } },
+  {url: mask2, posZ: 1.5, offsetY: -0.01, geometry: {x: 2, y: 1 } },
+  {url: mask3, posZ: 1.5, offsetY: -0.35, geometry: {x: 3, y: 3 } },
 ]
 
-const glassesSrc = masks[2]
+const glassesSrc = masks[1]
 
 const MaskModule = () => {
  const webcamRef = useRef(null);
@@ -129,12 +129,12 @@ const MaskModule = () => {
 
         <div style={{ position: 'relative', margin:'0 auto', width: '100%',}}>
           {isLoading && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '800px', height: '800px', backgroundColor: 'rgba(255, 255, 255, 0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2 }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', backgroundColor: 'rgba(255, 255, 255, 0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 2 }}>
               <h3>Loading...</h3>
           </div>
           )}
-          <Webcam ref={webcamRef} autoPlay playsInline style={{ width: '800px', height: '800px' }} mirrored={true} />
-          <canvas ref={canvasRef} style={{ width: '800px', height: '800px', position: 'absolute', top: 0, left: 0 }} />
+          <Webcam ref={webcamRef} autoPlay playsInline style={{ width: '100%', height: '100%' }} mirrored={true} />
+          <canvas ref={canvasRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />
         </div>
       </>
       
