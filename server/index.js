@@ -16,13 +16,17 @@ const server = createServer(app)
 app.use(express.static(join(__dirname, '../client/dist')))
 
 const io = new Server(server, {
-    cors: process.env.ALLOWED_ORIGIN || "*",
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    },
     serveClient: false
 })
 
 io.on('connection', initSocket)
    
 const port = process.env.PORT || 4000
-server.listen(port, () => {
+server.listen(port, '0.0.0.0', () => {
  console.log(`Server ready on port ${port} 🚀`)
+ console.log(`Access from network: http://127.0.0.1:${port}`)
 })

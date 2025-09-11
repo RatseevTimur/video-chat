@@ -1,0 +1,16 @@
+{
+  "appId": "com.videochat.app",
+  "appName": "Video Chat",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true
+  },
+  "plugins": {
+    "Camera": {
+      "permissions": [
+        "camera",
+        "photos"
+      ]
+    }
+  }
+}

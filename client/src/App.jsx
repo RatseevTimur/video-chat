@@ -1,16 +1,18 @@
 import './styles/app.scss'
 
-import { useState, useEffect } from 'react'
-import { Routes, Route } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { BsPhoneVibrate } from 'react-icons/bs'
+import { Route, Routes, useSearchParams } from 'react-router-dom'
 
 import PeerConnection from './utils/PeerConnection'
 import socket from './utils/socket'
 
 // import { MainWindow, CallWindow, CallModal } from './components'
 import CallModal from './components/CallModal'
-import MainWindow from './components/MainWindow'
 import CallWindow from './components/CallWindow'
+import MainWindow from './components/MainWindow'
+import RoomCall from './components/RoomCall'
+import RoomManager from './components/RoomManager'
 
 import MaskModule from './components/MaskModule'
 
@@ -25,6 +27,7 @@ export default function App() {
 
  const [pc, setPc] = useState(null)
  const [config, setConfig] = useState(null)
+ const [searchParams] = useSearchParams()
 
  useEffect(() => {
    socket.on('request', ({ from }) => {
@@ -124,8 +127,11 @@ export default function App() {
   <div className='app'>
     
     <Routes>
-      <Route path="/" element={<MaskModule />}/>
+      <Route path="/" element={<RoomManager />}/>
+      <Route path="/masks" element={<MaskModule />}/>
       <Route path="/call" element={<CallPage />}/>
+      <Route path="/room/:roomId" element={<RoomManager />}/>
+      <Route path="/room/:roomId/call" element={<RoomCall />}/>
       
       {/* <Route path="/*" element={<NotFound/>}/> */}
     </Routes>
