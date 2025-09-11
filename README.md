@@ -2,6 +2,8 @@
 
 **WebRTC + ThreeJS + React + ExpressJS + Vite**
 
+**Demo: https://video-chat-one-delta.vercel.app/**
+
 Интерактивное видеочат приложение с распознаванием лиц и наложением масок в реальном времени.
 
 ## ✨ Возможности
