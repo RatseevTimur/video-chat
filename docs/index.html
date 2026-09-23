@@ -142,15 +142,10 @@
 
       <div class="card">
         <h2>2. Запуск на VPS (копируй целиком)</h2>
-        <p>Нужен сервер с Node.js 18+ (Ubuntu 22.04 ок).</p>
+        <p><code>./start.sh</code> сам ставит <strong>Node.js 20</strong>, если его нет (Ubuntu/Debian).</p>
         <h3>Вариант A — есть git (HTTPS, SSH не нужен)</h3>
         <button class="copy" type="button" data-copy="ru-git">Copy</button>
-        <pre id="ru-git">sudo apt update
-sudo apt install -y git curl unzip
-# Node 20
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
+        <pre id="ru-git">sudo apt update && sudo apt install -y git curl unzip
 git clone https://github.com/RatseevTimur/video-chat.git
 cd video-chat
 chmod +x start.sh
@@ -158,14 +153,16 @@ chmod +x start.sh
 
         <h3>Вариант B — нет git (ZIP)</h3>
         <button class="copy" type="button" data-copy="ru-zip">Copy</button>
-        <pre id="ru-zip">sudo apt update
-sudo apt install -y curl unzip
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
+        <pre id="ru-zip">sudo apt update && sudo apt install -y curl unzip
 curl -L -o chat.zip https://github.com/RatseevTimur/video-chat/archive/refs/heads/main.zip
-unzip chat.zip
+unzip -o chat.zip
 cd video-chat-main
+chmod +x start.sh
+./start.sh</pre>
+
+        <h3>Уже в папке, нет Node?</h3>
+        <button class="copy" type="button" data-copy="ru-again">Copy</button>
+        <pre id="ru-again">cd ~/video-chat-main
 chmod +x start.sh
 ./start.sh</pre>
       </div>
@@ -208,14 +205,10 @@ sudo ufw reload</pre>
 
       <div class="card">
         <h2>2. Deploy on a VPS (copy-paste)</h2>
-        <p>Need Node.js 18+ (Ubuntu 22.04 is fine).</p>
+        <p><code>./start.sh</code> auto-installs <strong>Node.js 20</strong> on Ubuntu/Debian if missing.</p>
         <h3>Option A — with git (HTTPS, no SSH required)</h3>
         <button class="copy" type="button" data-copy="en-git">Copy</button>
-        <pre id="en-git">sudo apt update
-sudo apt install -y git curl unzip
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
+        <pre id="en-git">sudo apt update && sudo apt install -y git curl unzip
 git clone https://github.com/RatseevTimur/video-chat.git
 cd video-chat
 chmod +x start.sh
@@ -223,14 +216,16 @@ chmod +x start.sh
 
         <h3>Option B — no git (ZIP)</h3>
         <button class="copy" type="button" data-copy="en-zip">Copy</button>
-        <pre id="en-zip">sudo apt update
-sudo apt install -y curl unzip
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs
-
+        <pre id="en-zip">sudo apt update && sudo apt install -y curl unzip
 curl -L -o chat.zip https://github.com/RatseevTimur/video-chat/archive/refs/heads/main.zip
-unzip chat.zip
+unzip -o chat.zip
 cd video-chat-main
+chmod +x start.sh
+./start.sh</pre>
+
+        <h3>Already extracted, no Node?</h3>
+        <button class="copy" type="button" data-copy="en-again">Copy</button>
+        <pre id="en-again">cd ~/video-chat-main
 chmod +x start.sh
 ./start.sh</pre>
       </div>
