@@ -16,13 +16,17 @@ const AuthGate = ({ children }) => {
   const [step, setStep] = useState('form')
   const [hint, setHint] = useState('')
   const [mailOn, setMailOn] = useState(false)
+  const [mailStore, setMailStore] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [backup, setBackup] = useState('')
   const [showBackupOnce, setShowBackupOnce] = useState(false)
 
   useEffect(() => {
-    api('/api/bootstrap').then((data) => setMailOn(Boolean(data.mail))).catch(() => {})
+    api('/api/bootstrap').then((data) => {
+      setMailOn(Boolean(data.mail))
+      setMailStore(Boolean(data.mailStore))
+    }).catch(() => {})
   }, [])
 
   const start = async (event) => {
@@ -103,18 +107,22 @@ const AuthGate = ({ children }) => {
         <p className="eyebrow">Invite + подтверждение почты / Email verified</p>
         <h1>Семейный чат</h1>
         <p className="lead">
-          Почта подтверждается кодом. Без кода войти нельзя — так мы знаем, что
-          ящик ваш. Сообщения шифруются на устройстве; на почту уходит
-          уведомление + шифротекст (Яндекс текст не прочитает).
+          Вход: только почта + код. После входа чат идёт в памяти (E2E), без
+          писем на каждое сообщение — если сервер без MAIL_URL.
         </p>
         <p className="lead en">
-          Email is verified with a one-time code. Messages are E2E; mail gets a
-          notification plus ciphertext only.
+          Sign-in: email + code only. After that, chat stays in RAM (E2E).
+          Per-message mail is used only when MAIL_URL is configured (mail-as-DB).
+        </p>
+        <p className="lead">
+          {mailStore
+            ? '✓ Режим B: почта = авторизация + «БД» (уведомления и шифротекст в письмах)'
+            : '✓ Режим A: почта только для кода входа; сообщения только в RAM / сокете'}
         </p>
         <p className="lead">
           {mailOn
-            ? '✓ SMTP включён — код придёт на почту / Mail ON — code arrives by email'
-            : '⚠ SMTP выключен — код смотрите в терминале сервера / Mail OFF — code is in the server terminal'}
+            ? 'Код придёт на почту / Code arrives by email'
+            : 'Код смотрите в терминале сервера / Code is in the server terminal'}
         </p>
 
         {step === 'form' ? (

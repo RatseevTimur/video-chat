@@ -13,7 +13,7 @@ import {
   startAuth,
   verifyAuth
 } from './messenger.js'
-import { mailConfigured } from './mailer.js'
+import { mailConfigured, mailStoreEnabled } from './mailer.js'
 
 function auth(req) {
   const header = req.headers.authorization || ''
@@ -49,12 +49,17 @@ function fail(res, error) {
 export function attachApi(app) {
   app.get('/api/bootstrap', (_req, res) => {
     res.json({
-      mode: 'ram',
       mail: mailConfigured(),
+      mailStore: mailStoreEnabled(),
+      mode: mailStoreEnabled() ? 'mail-db' : (mailConfigured() ? 'mail-auth' : 'ram-auth'),
       publicUrl: getPublicUrl() || null,
       inviteHint: true,
       urls: listLanUrls(),
-      note: 'Email OTP proves ownership. Ciphertext may be emailed as a mailbox copy.'
+      note: mailStoreEnabled()
+        ? 'Mode B: email OTP + ciphertext in mail.'
+        : mailConfigured()
+          ? 'Mode A+: email OTP only; messages in RAM.'
+          : 'Mode A: console OTP; messages in RAM.'
     })
   })
 

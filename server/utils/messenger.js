@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { networkInterfaces } from 'os'
 import { nanoid } from 'nanoid'
 
-import { mailConfigured, sendMail } from './mailer.js'
+import { mailConfigured, mailStoreEnabled, sendMail } from './mailer.js'
 
 const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000
@@ -83,9 +83,11 @@ export function printBanner(protocol = 'https') {
   const urls = listLanUrls(PORT, protocol)
   const invitePaths = urls.map((base) => `${base}/?invite=${INVITE}`)
   const line = '═'.repeat(56)
-  const mailNote = mailConfigured()
-    ? '  Mail: ON — email OTP + message notifications\n'
-    : '  Mail: OFF — OTP printed in this terminal (set MAIL_URL to send real mail)\n'
+  const mailNote = mailStoreEnabled()
+    ? '  Mode B: MAIL_URL — OTP by email + mailbox store for messages\n'
+    : mailConfigured()
+      ? '  Mode A+: MAIL_URL — OTP by email only; chat in RAM (MAIL_STORE=0)\n'
+      : '  Mode A: no MAIL_URL — OTP in this terminal; chat only in RAM\n'
   const tunnelNote = PUBLIC_URL
     ? `  Public HTTPS (trusted cert): ${PUBLIC_URL}/?invite=${INVITE}\n`
     : '  Tip: run with Cloudflare tunnel for a green-lock random https URL\n'
@@ -241,19 +243,24 @@ export async function createChat({ owner, name, emails }) {
 
   const link = appLink(`/chat/${id}`)
   const ownerName = users[owner]?.name || owner
-  await Promise.all(members.filter((m) => m !== owner).map((member) => sendMail({
-    to: member,
-    subject: `Вас добавили в чат «${chats[id].name}» / Chat invite`,
-    text: [
-      `${ownerName} добавил(а) вас в семейный чат.`,
-      `${ownerName} added you to a family chat.`,
-      '',
-      `Откройте: ${link}`,
-      `Войдите почтой: ${member}`,
-      '',
-      'Нужен код из письма при входе (подтверждение почты).'
-    ].join('\n')
-  })))
+
+  // Mode B: MAIL_URL set → email is notification + ciphertext store
+  // Mode A: no MAIL_URL → chat stays in RAM only (auth code already sent separately)
+  if (mailStoreEnabled()) {
+    await Promise.all(members.filter((m) => m !== owner).map((member) => sendMail({
+      to: member,
+      subject: `Вас добавили в чат «${chats[id].name}» / Chat invite`,
+      text: [
+        `${ownerName} добавил(а) вас в семейный чат.`,
+        `${ownerName} added you to a family chat.`,
+        '',
+        `Откройте: ${link}`,
+        `Войдите почтой: ${member}`,
+        '',
+        'Нужен код из письма при входе (подтверждение почты).'
+      ].join('\n')
+    })))
+  }
 
   return chats[id]
 }
@@ -296,25 +303,28 @@ export async function postMessage({ chatId, email, boxes }) {
   list.push(item)
   messages[chatId] = list.slice(-200)
 
-  const link = appLink(`/chat/${chatId}`)
-  const fromName = users[email]?.name || email
-  await Promise.all(chat.members.filter((m) => m !== normalizeEmail(email)).map((member) => {
-    const box = cleanBoxes[member]
-    const opaque = box ? `ENC:${item.id}:${box.iv}:${box.ct}` : `ENC:${item.id}`
-    return sendMail({
-      to: member,
-      subject: `Новое сообщение в «${chat.name}» / New message`,
-      text: [
-        `${fromName} написал(а) вам.`,
-        `${fromName} sent you a message.`,
-        '',
-        `Откройте чат: ${link}`,
-        '',
-        'Ниже шифротекст (почта его не прочитает):',
-        opaque
-      ].join('\n')
-    })
-  }))
+  // Mode B only: persist/notify via mailbox. Mode A: RAM + live socket only.
+  if (mailStoreEnabled()) {
+    const link = appLink(`/chat/${chatId}`)
+    const fromName = users[email]?.name || email
+    await Promise.all(chat.members.filter((m) => m !== normalizeEmail(email)).map((member) => {
+      const box = cleanBoxes[member]
+      const opaque = box ? `ENC:${item.id}:${box.iv}:${box.ct}` : `ENC:${item.id}`
+      return sendMail({
+        to: member,
+        subject: `Новое сообщение в «${chat.name}» / New message`,
+        text: [
+          `${fromName} написал(а) вам.`,
+          `${fromName} sent you a message.`,
+          '',
+          `Откройте чат: ${link}`,
+          '',
+          'Ниже шифротекст (почта его не прочитает):',
+          opaque
+        ].join('\n')
+      })
+    }))
+  }
 
   return item
 }

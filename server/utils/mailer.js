@@ -36,6 +36,12 @@ export function mailConfigured() {
   return Boolean(smtpConfig())
 }
 
+/** Mode B: copy ciphertext / invites to mailboxes. Default ON when MAIL_URL is set. */
+export function mailStoreEnabled() {
+  if (!mailConfigured()) return false
+  return process.env.MAIL_STORE !== '0'
+}
+
 export async function sendMail({ to, subject, text }) {
   const cfg = smtpConfig()
   if (!cfg) {
