@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { api, getSession, setSession } from '../utils/auth'
@@ -12,22 +12,48 @@ const AuthGate = ({ children }) => {
   const [invite, setInvite] = useState(defaultInvite)
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
+  const [code, setCode] = useState('')
+  const [step, setStep] = useState('form')
+  const [hint, setHint] = useState('')
+  const [mailOn, setMailOn] = useState(false)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [backup, setBackup] = useState('')
   const [showBackupOnce, setShowBackupOnce] = useState(false)
 
-  const join = async (event) => {
+  useEffect(() => {
+    api('/api/bootstrap').then((data) => setMailOn(Boolean(data.mail))).catch(() => {})
+  }, [])
+
+  const start = async (event) => {
     event.preventDefault()
     setBusy(true)
     setError('')
     try {
       const keys = await loadOrCreateKeys()
-      const result = await api('/api/auth/join', {
+      const result = await api('/api/auth/start', {
         method: 'POST',
         body: { invite, email, name, publicJwk: keys.publicJwk }
       })
       try { localStorage.setItem('vc-invite', invite.trim()) } catch { /* ignore */ }
+      setHint(result.hint || '')
+      setStep('code')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const verify = async (event) => {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const result = await api('/api/auth/verify', {
+        method: 'POST',
+        body: { email, code }
+      })
       const next = { token: result.token, email: result.user.email, name: result.user.name }
       setSession(next)
       setStoredName(result.user.name)
@@ -52,7 +78,6 @@ const AuthGate = ({ children }) => {
           <h1>Сохраните ключ / Save this key</h1>
           <p className="lead">
             Один раз: без ключа на новом телефоне старые сообщения не прочитать.
-            Сервер ключ не хранит.
           </p>
           <textarea className="backup" readOnly value={backup} rows={6} />
           <button
@@ -75,47 +100,56 @@ const AuthGate = ({ children }) => {
   return (
     <div className="landing">
       <div className="landing-card">
-        <p className="eyebrow">Invite + E2E · без SMTP</p>
+        <p className="eyebrow">Invite + подтверждение почты / Email verified</p>
         <h1>Семейный чат</h1>
         <p className="lead">
-          Откройте <strong>https://</strong> invite-ссылку с сервера. Браузер
-          покажет предупреждение о сертификате — нажмите «Дополнительно» →
-          «Перейти». По HTTP камера и шифрование в Chrome не работают.
+          Почта подтверждается кодом. Без кода войти нельзя — так мы знаем, что
+          ящик ваш. Сообщения шифруются на устройстве; на почту уходит
+          уведомление + шифротекст (Яндекс текст не прочитает).
         </p>
         <p className="lead en">
-          Use the <strong>https://</strong> invite from the server terminal.
-          Accept the self-signed certificate warning. Plain HTTP breaks camera
-          and Web Crypto in Chrome.
+          Email is verified with a one-time code. Messages are E2E; mail gets a
+          notification plus ciphertext only.
+        </p>
+        <p className="lead">
+          {mailOn
+            ? '✓ SMTP включён — код придёт на почту / Mail ON — code arrives by email'
+            : '⚠ SMTP выключен — код смотрите в терминале сервера / Mail OFF — code is in the server terminal'}
         </p>
 
-        <form onSubmit={join}>
-          <label className="field">
-            <span>Invite-код / Invite code</span>
-            <input
-              required
-              value={invite}
-              onChange={(e) => setInvite(e.target.value)}
-              placeholder="из терминала сервера / from server terminal"
-            />
-          </label>
-          <label className="field">
-            <span>Имя / Name</span>
-            <input value={name} maxLength={24} onChange={(e) => setName(e.target.value)} placeholder="Мама" />
-          </label>
-          <label className="field">
-            <span>Почта (ID) / Email (ID)</span>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="ivanov@yandex.ru"
-            />
-          </label>
-          <button type="submit" className="btn btn-success" disabled={busy}>
-            Войти / Join
-          </button>
-        </form>
+        {step === 'form' ? (
+          <form onSubmit={start}>
+            <label className="field">
+              <span>Invite-код / Invite</span>
+              <input required value={invite} onChange={(e) => setInvite(e.target.value)} />
+            </label>
+            <label className="field">
+              <span>Имя / Name</span>
+              <input value={name} maxLength={24} onChange={(e) => setName(e.target.value)} placeholder="Мама" />
+            </label>
+            <label className="field">
+              <span>Почта / Email</span>
+              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ivanov@yandex.ru" />
+            </label>
+            <button type="submit" className="btn btn-success" disabled={busy}>
+              Получить код / Get code
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={verify}>
+            <p className="lead">{hint}</p>
+            <label className="field">
+              <span>Код из письма / Code from email</span>
+              <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" placeholder="123456" required />
+            </label>
+            <button type="submit" className="btn btn-success" disabled={busy}>
+              Подтвердить / Verify
+            </button>
+            <button type="button" className="btn btn-outline" disabled={busy} onClick={() => setStep('form')}>
+              Назад / Back
+            </button>
+          </form>
+        )}
 
         {error && <div className="error">{error}</div>}
       </div>
