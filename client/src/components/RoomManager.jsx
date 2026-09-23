@@ -1,196 +1,128 @@
-import React, { useEffect, useState } from 'react'
-import { BsBoxArrowInRight, BsCheck, BsCopy, BsPlus } from 'react-icons/bs'
-import { Link, useParams } from 'react-router-dom'
+import { useState } from 'react'
+import { BsBoxArrowInRight, BsCameraVideo, BsChatDots, BsPlus } from 'react-icons/bs'
+import { useNavigate } from 'react-router-dom'
 
+import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
 
 const RoomManager = () => {
-  const { roomId: urlRoomId } = useParams()
-  const [localId, setLocalId] = useState('')
-  const [roomId, setRoomId] = useState('')
-  const [createdRoomId, setCreatedRoomId] = useState('')
-  const [roomInfo, setRoomInfo] = useState(null)
+  const navigate = useNavigate()
+  const [name, setName] = useState(getStoredName())
+  const [joinId, setJoinId] = useState('')
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    socket
-      .on('init', ({ id }) => {
-        setLocalId(id)
-        // Если есть roomId в URL, автоматически присоединяемся
-        if (urlRoomId) {
-          socket.emit('joinRoom', { roomId: urlRoomId })
-        }
-      })
-      .on('roomCreated', ({ roomId, roomInfo }) => {
-        setCreatedRoomId(roomId)
-        setRoomId(roomId)
-        setRoomInfo(roomInfo)
-        setError('')
-      })
-      .on('roomJoined', ({ roomId, roomInfo }) => {
-        setRoomId(roomId)
-        setRoomInfo(roomInfo)
-        setError('')
-      })
-      .on('roomError', ({ message }) => {
-        setError(message)
-      })
-      .on('userJoined', ({ userId, roomInfo }) => {
-        setRoomInfo(roomInfo)
-      })
-      .on('userLeft', ({ userId, roomInfo }) => {
-        setRoomInfo(roomInfo)
-      })
-      .on('hostChanged', ({ newHost, roomInfo }) => {
-        setRoomInfo(roomInfo)
-      })
-      .emit('init')
+  const rememberName = () => setStoredName(name)
 
-    return () => {
-      socket.off('init')
-      socket.off('roomCreated')
-      socket.off('roomJoined')
-      socket.off('roomError')
-      socket.off('userJoined')
-      socket.off('userLeft')
-      socket.off('hostChanged')
+  const createRoom = (type) => {
+    rememberName()
+    setBusy(true)
+    setError('')
+
+    const onCreated = ({ roomId }) => {
+      socket.off('roomCreated', onCreated)
+      socket.off('roomError', onError)
+      navigate(`/room/${roomId}`)
     }
-  }, [urlRoomId])
+    const onError = ({ message }) => {
+      socket.off('roomCreated', onCreated)
+      socket.off('roomError', onError)
+      setError(message)
+      setBusy(false)
+    }
 
-  const createRoom = () => {
-    socket.emit('createRoom')
+    const timer = setTimeout(() => {
+      socket.off('roomCreated', onCreated)
+      socket.off('roomError', onError)
+      setBusy(false)
+      setError('Нет связи с сервером / Cannot reach the server')
+    }, 5000)
+
+    const onCreatedWrapped = (payload) => {
+      clearTimeout(timer)
+      onCreated(payload)
+    }
+    const onErrorWrapped = (payload) => {
+      clearTimeout(timer)
+      onError(payload)
+    }
+
+    socket.once('roomCreated', onCreatedWrapped)
+    socket.once('roomError', onErrorWrapped)
+    const emitCreate = () => socket.emit('createRoom', { type, name })
+    if (socket.connected) emitCreate()
+    else {
+      socket.once('connect', emitCreate)
+      socket.connect()
+    }
   }
 
-  const joinRoom = () => {
-    if (!roomId.trim()) {
-      setError('Введите ID комнаты')
+  const joinRoom = (event) => {
+    event.preventDefault()
+    const roomId = joinId.trim()
+    if (!roomId) {
+      setError('Введите код комнаты / Enter a room code')
       return
     }
-    socket.emit('joinRoom', { roomId })
-  }
-
-  const leaveRoom = () => {
-    socket.emit('leaveRoom')
-    setRoomId('')
-    setCreatedRoomId('')
-    setRoomInfo(null)
-  }
-
-  const copyRoomLink = () => {
-    const link = `${window.location.origin}/room/${createdRoomId}`
-    navigator.clipboard.writeText(link).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
-
-  const getRoomLink = () => {
-    return `${window.location.origin}/room/${createdRoomId}`
+    rememberName()
+    navigate(`/room/${roomId}`)
   }
 
   return (
-    <div className="room-manager">
-      <div className="container">
-        <h1>🎥 Video Chat Rooms</h1>
-        
-        <div className="user-info">
-          <p><strong>Ваш ID:</strong> {localId}</p>
+    <div className="landing">
+      <div className="landing-card">
+        <p className="eyebrow">Легковесный Meet с масками / Lightweight Meet + masks</p>
+        <h1>Video Chat</h1>
+        <p className="lead">
+          Без базы данных, без истории. Видео идёт напрямую (WebRTC), чат живёт
+          только пока активен звонок.
+        </p>
+        <p className="lead en">
+          No database and no history. Video is peer-to-peer. Chat is wiped when
+          everyone hangs up. The room stays.
+        </p>
+
+        <label className="field">
+          <span>Ваше имя / Your name</span>
+          <input
+            value={name}
+            maxLength={24}
+            placeholder="Анна, Саша..."
+            onChange={(event) => setName(event.target.value)}
+            onBlur={rememberName}
+          />
+        </label>
+
+        <div className="landing-actions">
+          <button type="button" className="btn btn-success" disabled={busy} onClick={() => createRoom('video')}>
+            <BsCameraVideo /> <BsPlus /> Видеокомната / Video room
+          </button>
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => createRoom('text')}>
+            <BsChatDots /> <BsPlus /> Текстовый чат / Text room
+          </button>
         </div>
 
-        {!roomId ? (
-          <div className="room-actions">
-            <div className="create-room">
-              <h3>Создать новую комнату</h3>
-              <button onClick={createRoom} className="btn btn-primary">
-                <BsPlus /> Создать комнату
-              </button>
-            </div>
+        <form className="join-form" onSubmit={joinRoom}>
+          <input
+            value={joinId}
+            onChange={(event) => {
+              setJoinId(event.target.value)
+              setError('')
+            }}
+            placeholder="Код комнаты / Room code"
+          />
+          <button type="submit" className="btn btn-primary">
+            <BsBoxArrowInRight /> Войти / Join
+          </button>
+        </form>
 
-            <div className="join-room">
-              <h3>Присоединиться к комнате</h3>
-              <div className="input-group">
-                <input
-                  type="text"
-                  placeholder="Введите ID комнаты"
-                  value={roomId}
-                  onChange={(e) => {
-                    setRoomId(e.target.value)
-                    setError('')
-                  }}
-                />
-                <button onClick={joinRoom} className="btn btn-secondary">
-                  <BsBoxArrowInRight /> Присоединиться
-                </button>
-              </div>
-            </div>
+        {error && <div className="error">{error}</div>}
 
-            {error && <div className="error">{error}</div>}
-          </div>
-        ) : (
-          <div className="room-info">
-            <h3>Комната: {roomId}</h3>
-            
-            {createdRoomId && (
-              <div className="room-link">
-                <h4>Ссылка для приглашения:</h4>
-                <div className="link-container">
-                  <input 
-                    type="text" 
-                    value={getRoomLink()} 
-                    readOnly 
-                    className="link-input"
-                  />
-                  <button 
-                    onClick={copyRoomLink} 
-                    className="btn btn-small"
-                    title="Копировать ссылку"
-                  >
-                    {copied ? <BsCheck /> : <BsCopy />}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            <div className="participants">
-              <h4>Участники ({roomInfo?.participantCount || 0}):</h4>
-              <div className="participants-list">
-                {roomInfo?.participants?.map(participantId => (
-                  <div key={participantId} className="participant">
-                    <span className="participant-id">{participantId}</span>
-                    {participantId === localId && <span className="you">(Вы)</span>}
-                    {participantId === roomInfo?.host && <span className="host">👑</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="room-controls">
-              <Link to={`/room/${roomId}/call`} className="btn btn-success">
-                🎥 Начать видеозвонок
-              </Link>
-              <button onClick={leaveRoom} className="btn btn-danger">
-                Покинуть комнату
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="legacy-mode">
-          <h3>Классический режим</h3>
-          <p>Используйте ID пользователя для прямого звонка</p>
-          <Link to="/call" className="btn btn-outline">
-            Перейти к классическому режиму
-          </Link>
-        </div>
-
-        <div className="masks-demo">
-          <h3>Демо масок</h3>
-          <p>Посмотрите на распознавание лиц и наложение масок</p>
-          <Link to="/masks" className="btn btn-outline">
-            🎭 Демо масок
-          </Link>
-        </div>
+        <ul className="landing-notes">
+          <li>Откройте ссылку комнаты у родственника — ему придёт входящий звонок на сайте.</li>
+          <li>Маски считаются на вашем устройстве и уходят уже в видео.</li>
+          <li>Для сложных сетей добавьте TURN в `.env` сервера.</li>
+        </ul>
       </div>
     </div>
   )

@@ -1,2 +1,31 @@
-/node_modules
+# deps / build
+node_modules/
+**/node_modules/
 .vercel
+client/dist/
+client/public/mediapipe
+dist/
+
+# secrets & local runtime (never commit)
+.env
+**/.env
+!**/.env.example
+server/data/
+*.pem
+*.key
+*.p12
+
+# OS / IDE junk
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# logs / local
+*.log
+npm-debug.log*
+yarn-error.log*
+.local/

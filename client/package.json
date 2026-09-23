@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/setup-mediapipe.mjs",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
@@ -16,6 +17,7 @@
     "@capacitor/core": "^7.4.3",
     "@capacitor/ios": "^7.4.3",
     "@mediapipe/face_mesh": "^0.4.1633559619",
+    "@mediapipe/tasks-vision": "1.0.1",
     "@tensorflow-models/face-landmarks-detection": "^0.0.3",
     "@tensorflow/tfjs": "^4.20.0",
     "@tensorflow/tfjs-backend-webgl": "^3.6.0",

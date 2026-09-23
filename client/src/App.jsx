@@ -1,141 +1,135 @@
-import './styles/app.scss'
-
 import { useEffect, useState } from 'react'
 import { BsPhoneVibrate } from 'react-icons/bs'
-import { Route, Routes, useSearchParams } from 'react-router-dom'
+import { Navigate, Route, Routes, useParams } from 'react-router-dom'
 
-import PeerConnection from './utils/PeerConnection'
-import socket from './utils/socket'
-
-// import { MainWindow, CallWindow, CallModal } from './components'
+import AuthGate from './components/AuthGate'
 import CallModal from './components/CallModal'
 import CallWindow from './components/CallWindow'
 import MainWindow from './components/MainWindow'
-import RoomCall from './components/RoomCall'
-import RoomManager from './components/RoomManager'
-
 import MaskModule from './components/MaskModule'
+import Messenger from './components/Messenger'
+import Room from './components/Room'
+import RoomManager from './components/RoomManager'
+import PeerConnection from './utils/PeerConnection'
+import { getStoredId } from './utils/session'
+import socket from './utils/socket'
+import './styles/app.scss'
 
 export default function App() {
- const [callFrom, setCallFrom] = useState('')
- const [calling, setCalling] = useState(false)
+  const [callFrom, setCallFrom] = useState('')
+  const [calling, setCalling] = useState(false)
+  const [showModal, setShowModal] = useState(false)
+  const [localSrc, setLocalSrc] = useState(null)
+  const [remoteSrc, setRemoteSrc] = useState(null)
+  const [pc, setPc] = useState(null)
+  const [config, setConfig] = useState(null)
 
- const [showModal, setShowModal] = useState(false)
+  useEffect(() => {
+    socket.emit('init', { id: getStoredId() })
+    socket.on('init', ({ id }) => {
+      try { sessionStorage.setItem('vc-id', id) } catch { /* ignore */ }
+    })
+    socket.on('request', ({ from }) => {
+      setCallFrom(from)
+      setShowModal(true)
+    })
+    return () => {
+      socket.off('init')
+      socket.off('request')
+    }
+  }, [])
 
- const [localSrc, setLocalSrc] = useState(null)
- const [remoteSrc, setRemoteSrc] = useState(null)
+  useEffect(() => {
+    if (!pc) return
+    const onCall = (data) => pc.applySignal(data)
+    const onEnd = () => finishCall(false)
+    socket.on('call', onCall)
+    socket.on('end', onEnd)
+    return () => {
+      socket.off('call', onCall)
+      socket.off('end', onEnd)
+    }
+  }, [pc])
 
- const [pc, setPc] = useState(null)
- const [config, setConfig] = useState(null)
- const [searchParams] = useSearchParams()
+  const startCall = async (isCaller, remoteId, nextConfig) => {
+    setShowModal(false)
+    setCalling(true)
+    setConfig(nextConfig)
 
- useEffect(() => {
-   socket.on('request', ({ from }) => {
-     setCallFrom(from)
-     setShowModal(true)
-   })
- }, [])
+    const connection = await PeerConnection.create(remoteId)
+    connection
+      .on('localStream', (stream) => setLocalSrc(stream))
+      .on('remoteStream', (stream) => {
+        setRemoteSrc(stream)
+        setCalling(false)
+      })
+      .start(isCaller, nextConfig)
 
- useEffect(() => {
-   if (!pc) return
+    setPc(connection)
+  }
 
-   socket
-     .on('call', (data) => {
-       if (data.sdp) {
-         pc.setRemoteDescription(data.sdp)
+  const rejectCall = () => {
+    socket.emit('end', { to: callFrom })
+    setShowModal(false)
+  }
 
-         if (data.sdp.type === 'offer') {
-           pc.createAnswer()
-         }
-       } else {
-         pc.addIceCandidate(data.candidate)
-       }
-     })
-     .on('end', () => finishCall(false))
- }, [pc])
+  const finishCall = (isCaller) => {
+    pc?.stop(isCaller)
+    pc?.mediaDevice?.stop()
+    setPc(null)
+    setConfig(null)
+    setCalling(false)
+    setShowModal(false)
+    setLocalSrc(null)
+    setRemoteSrc(null)
+  }
 
- const startCall = (isCaller, remoteId, config) => {
-   setShowModal(false)
-   setCalling(true)
-   setConfig(config)
-
-   const _pc = new PeerConnection(remoteId)
-     .on('localStream', (stream) => {
-       setLocalSrc(stream)
-     })
-     .on('remoteStream', (stream) => {
-       setRemoteSrc(stream)
-       setCalling(false)
-     })
-     .start(isCaller, config)
-
-   setPc(_pc)
- }
-
- const rejectCall = () => {
-   socket.emit('end', { to: callFrom })
-
-   setShowModal(false)
- }
-
- const finishCall = (isCaller) => {
-   pc.stop(isCaller)
-
-   setPc(null)
-   setConfig(null)
-
-   setCalling(false)
-   setShowModal(false)
-
-   setLocalSrc(null)
-   setRemoteSrc(null)
- }
-
- const CallPage = () => {
-  return(
+  const CallPage = () => (
     <>
-    <h1>Video-Chat</h1>
-     <MainWindow startCall={startCall} />
-     {calling && (
-       <div className='calling'>
-         <button disabled>
-           <BsPhoneVibrate />
-         </button>
-       </div>
-     )}
-     {showModal && (
-       <CallModal
-         callFrom={callFrom}
-         startCall={startCall}
-         rejectCall={rejectCall}
-       />
-     )}
-     {remoteSrc && (
-       <CallWindow
-         localSrc={localSrc}
-         remoteSrc={remoteSrc}
-         config={config}
-         mediaDevice={pc?.mediaDevice}
-         finishCall={finishCall}
-       />
-     )}
+      <h1>Video-Chat</h1>
+      <MainWindow startCall={startCall} />
+      {calling && (
+        <div className="calling">
+          <button disabled>
+            <BsPhoneVibrate />
+          </button>
+        </div>
+      )}
+      {showModal && (
+        <CallModal
+          callFrom={callFrom}
+          startCall={startCall}
+          rejectCall={rejectCall}
+        />
+      )}
+      {remoteSrc && (
+        <CallWindow
+          localSrc={localSrc}
+          remoteSrc={remoteSrc}
+          config={config}
+          mediaDevice={pc?.mediaDevice}
+          finishCall={finishCall}
+        />
+      )}
     </>
   )
- }
 
- return (
-  <div className='app'>
-    
-    <Routes>
-      <Route path="/" element={<RoomManager />}/>
-      <Route path="/masks" element={<MaskModule />}/>
-      <Route path="/call" element={<CallPage />}/>
-      <Route path="/room/:roomId" element={<RoomManager />}/>
-      <Route path="/room/:roomId/call" element={<RoomCall />}/>
-      
-      {/* <Route path="/*" element={<NotFound/>}/> */}
-    </Routes>
-     
-  </div>
- )
+  return (
+    <div className="app">
+      <Routes>
+        <Route path="/" element={<AuthGate><Messenger /></AuthGate>} />
+        <Route path="/chat/:chatId" element={<AuthGate><Messenger /></AuthGate>} />
+        <Route path="/guest" element={<RoomManager />} />
+        <Route path="/masks" element={<MaskModule />} />
+        <Route path="/call" element={<CallPage />} />
+        <Route path="/room/:roomId" element={<Room />} />
+        <Route path="/room/:roomId/call" element={<RedirectLegacyCall />} />
+      </Routes>
+    </div>
+  )
+}
+
+function RedirectLegacyCall() {
+  const { roomId } = useParams()
+  return <Navigate to={`/room/${roomId}`} replace />
 }

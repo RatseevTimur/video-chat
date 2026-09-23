@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Family Chat · Install</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #171a21;
+      --text: #e8eaed;
+      --muted: #9aa0a6;
+      --line: #2a2f3a;
+      --ok: #1e8e3e;
+      --blue: #1a73e8;
+      --warn: #f9ab00;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: radial-gradient(circle at top, #1c2433, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.55;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 2rem 1.2rem 4rem; }
+    .hero {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      overflow: hidden;
+      background: var(--card);
+      margin-bottom: 1.2rem;
+    }
+    .hero img { width: 100%; display: block; }
+    .hero .pad { padding: 1.2rem 1.4rem 1.5rem; }
+    h1 { margin: 0 0 0.4rem; font-size: 1.8rem; }
+    .lead { color: var(--muted); margin: 0; }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin: 1.2rem 0 1rem;
+    }
+    .tabs button {
+      border: 1px solid var(--line);
+      background: #12151c;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 0.55rem 1rem;
+      cursor: pointer;
+      font: inherit;
+    }
+    .tabs button.active {
+      background: var(--blue);
+      border-color: var(--blue);
+    }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 1.1rem 1.2rem;
+      margin: 0.9rem 0;
+    }
+    h2 { margin: 0 0 0.7rem; font-size: 1.15rem; }
+    h3 { margin: 1rem 0 0.4rem; font-size: 1rem; }
+    pre {
+      background: #0b0d11;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.9rem 1rem;
+      overflow: auto;
+      font-size: 0.92rem;
+      position: relative;
+    }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .copy {
+      float: right;
+      margin: -0.2rem 0 0.6rem 0.6rem;
+      border: 0;
+      border-radius: 8px;
+      background: #2a3140;
+      color: white;
+      padding: 0.35rem 0.7rem;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.85rem;
+    }
+    .copy:hover { background: #3a4356; }
+    .ok { color: #81c995; }
+    .warn { color: var(--warn); }
+    ul { padding-left: 1.2rem; }
+    li + li { margin-top: 0.35rem; }
+    a { color: #8ab4f8; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.8rem;
+    }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+    .pill {
+      display: inline-block;
+      padding: 0.15rem 0.55rem;
+      border-radius: 999px;
+      background: #243042;
+      font-size: 0.8rem;
+      color: #c4d2e8;
+    }
+    img.flow { width: 100%; border-radius: 12px; border: 1px solid var(--line); margin: 0.6rem 0 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <img src="assets/hero-banner.png" alt="Family Chat banner" />
+      <div class="pad">
+        <h1>Family Chat</h1>
+        <p class="lead">Self-host messenger + video calls with masks · личный сервер без базы данных</p>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button type="button" class="active" data-tab="ru" role="tab">🇷🇺 Русский</button>
+      <button type="button" data-tab="en" role="tab">🇬🇧 English</button>
+      <button type="button" data-tab="blocks" role="tab">🛡 Блокировки / Censorship</button>
+    </div>
+
+    <!-- RU -->
+    <section id="ru" class="panel active" role="tabpanel">
+      <div class="card">
+        <h2>1. Что это</h2>
+        <ul>
+          <li>Свой сервер (как 3x-UI): <span class="pill">clone → start → ссылка</span></li>
+          <li>Чат с E2E: сервер видит только шифротекст</li>
+          <li>Видеозвонки WebRTC + маски</li>
+          <li><strong>Нет базы данных</strong> — всё в RAM. Рестарт = чистая память</li>
+          <li>Почта — только ID. Пароль от Яндекса <strong>не нужен</strong></li>
+        </ul>
+        <img class="flow" src="assets/install-flow.png" alt="Clone → Start → Share" />
+      </div>
+
+      <div class="card">
+        <h2>2. Запуск на VPS (копируй целиком)</h2>
+        <p>Нужен сервер с Node.js 18+ (Ubuntu 22.04 ок).</p>
+        <h3>Вариант A — есть git (HTTPS, SSH не нужен)</h3>
+        <button class="copy" type="button" data-copy="ru-git">Copy</button>
+        <pre id="ru-git">sudo apt update
+sudo apt install -y git curl unzip
+# Node 20
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+git clone https://github.com/RatseevTimur/video-chat.git
+cd video-chat
+chmod +x start.sh
+./start.sh</pre>
+
+        <h3>Вариант B — нет git (ZIP)</h3>
+        <button class="copy" type="button" data-copy="ru-zip">Copy</button>
+        <pre id="ru-zip">sudo apt update
+sudo apt install -y curl unzip
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+curl -L -o chat.zip https://github.com/RatseevTimur/video-chat/archive/refs/heads/main.zip
+unzip chat.zip
+cd video-chat-main
+chmod +x start.sh
+./start.sh</pre>
+      </div>
+
+      <div class="card">
+        <h2>3. Что появится в терминале</h2>
+        <pre>→ http://ВАШ_IP:4000/?invite=XXXX</pre>
+        <p>Эту ссылку отправьте родственникам. Открыли → имя + почта (как ID) → чат/звонок.</p>
+        <p class="warn">Рестарт сервера очищает чаты в RAM. Ключи E2E остаются в браузере людей.</p>
+      </div>
+
+      <div class="card">
+        <h2>4. Открыть порт</h2>
+        <button class="copy" type="button" data-copy="ru-fw">Copy</button>
+        <pre id="ru-fw"># UFW пример
+sudo ufw allow 4000/tcp
+sudo ufw reload</pre>
+        <p>Если есть домен и nginx — проксируйте на <code>127.0.0.1:4000</code> (желательно HTTPS).</p>
+      </div>
+
+      <div class="card">
+        <h2>5. Архитектура</h2>
+        <img class="flow" src="assets/architecture.svg" alt="Architecture diagram" />
+      </div>
+    </section>
+
+    <!-- EN -->
+    <section id="en" class="panel" role="tabpanel">
+      <div class="card">
+        <h2>1. What it is</h2>
+        <ul>
+          <li>Self-host like 3x-UI: <span class="pill">clone → start → invite link</span></li>
+          <li>E2E chat: server only stores ciphertext in RAM</li>
+          <li>WebRTC video + face masks</li>
+          <li><strong>No database</strong>. Restart wipes server memory (by design)</li>
+          <li>Email is just an ID — <strong>no mailbox password</strong></li>
+        </ul>
+        <img class="flow" src="assets/install-flow.png" alt="Clone → Start → Share" />
+      </div>
+
+      <div class="card">
+        <h2>2. Deploy on a VPS (copy-paste)</h2>
+        <p>Need Node.js 18+ (Ubuntu 22.04 is fine).</p>
+        <h3>Option A — with git (HTTPS, no SSH required)</h3>
+        <button class="copy" type="button" data-copy="en-git">Copy</button>
+        <pre id="en-git">sudo apt update
+sudo apt install -y git curl unzip
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+git clone https://github.com/RatseevTimur/video-chat.git
+cd video-chat
+chmod +x start.sh
+./start.sh</pre>
+
+        <h3>Option B — no git (ZIP)</h3>
+        <button class="copy" type="button" data-copy="en-zip">Copy</button>
+        <pre id="en-zip">sudo apt update
+sudo apt install -y curl unzip
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt install -y nodejs
+
+curl -L -o chat.zip https://github.com/RatseevTimur/video-chat/archive/refs/heads/main.zip
+unzip chat.zip
+cd video-chat-main
+chmod +x start.sh
+./start.sh</pre>
+      </div>
+
+      <div class="card">
+        <h2>3. Terminal output</h2>
+        <pre>→ http://YOUR_IP:4000/?invite=XXXX</pre>
+        <p>Share that link. Relatives open it → name + email (ID) → chat/call.</p>
+        <p class="warn">Server restart clears RAM chats. Browser E2E keys remain on devices.</p>
+      </div>
+
+      <div class="card">
+        <h2>4. Open the firewall</h2>
+        <button class="copy" type="button" data-copy="en-fw">Copy</button>
+        <pre id="en-fw">sudo ufw allow 4000/tcp
+sudo ufw reload</pre>
+      </div>
+
+      <div class="card">
+        <h2>5. Architecture</h2>
+        <img class="flow" src="assets/architecture.svg" alt="Architecture diagram" />
+      </div>
+    </section>
+
+    <!-- BLOCKS -->
+    <section id="blocks" class="panel" role="tabpanel">
+      <div class="card">
+        <h2>Страны с блокировками / Censorship tips</h2>
+        <div class="grid">
+          <div>
+            <h3>RU</h3>
+            <ul>
+              <li>Ставьте приложение на <strong>российский VPS</strong> — сигналинг не зависит от Google.</li>
+              <li><code>git clone https://…</code> — SSH-ключ не нужен.</li>
+              <li>Если GitHub недоступен с сервера: скачайте ZIP дома и залейте через <code>scp</code>.</li>
+              <li>Видео идёт P2P. Если «не соединяется» из-за NAT — добавьте свой TURN (coturn) на том же сервере.</li>
+              <li>Не используйте чужой SMTP: invite-ссылка из терминала достаточна.</li>
+              <li>Открытость кода не раскрывает чаты — важны invite и ключи в браузере.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>EN</h3>
+            <ul>
+              <li>Host on a VPS inside the region your family can reach.</li>
+              <li>Prefer HTTPS clone; SSH keys are optional.</li>
+              <li>If GitHub is blocked: download ZIP elsewhere, upload with <code>scp</code>.</li>
+              <li>Video is P2P. For hard NAT, run coturn on the same host.</li>
+              <li>No mailbox login needed — share the invite printed by <code>./start.sh</code>.</li>
+              <li>Public source code does not decrypt messages.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>scp если GitHub закрыт / Upload ZIP via scp</h2>
+        <button class="copy" type="button" data-copy="scp">Copy</button>
+        <pre id="scp"># на своём компьютере / on your laptop
+curl -L -o chat.zip https://github.com/RatseevTimur/video-chat/archive/refs/heads/main.zip
+scp chat.zip root@ВАШ_СЕРВЕР:/root/
+
+# на сервере / on the server
+cd /root
+unzip chat.zip
+cd video-chat-main
+chmod +x start.sh
+./start.sh</pre>
+      </div>
+
+      <div class="card">
+        <h2>Закрепить invite / Keep the same invite after reboot</h2>
+        <button class="copy" type="button" data-copy="invite">Copy</button>
+        <pre id="invite">INVITE=my-family-secret PORT=4000 ./start.sh
+# или перед запуском:
+# export INVITE=my-family-secret</pre>
+        <p class="ok">Данные чатов всё равно только в RAM. Invite лишь открывает вход.</p>
+      </div>
+    </section>
+
+    <p class="lead" style="margin-top:1.5rem">
+      Repo:
+      <a href="https://github.com/RatseevTimur/video-chat">github.com/RatseevTimur/video-chat</a>
+    </p>
+  </div>
+
+  <script>
+    const panels = [...document.querySelectorAll('.panel')]
+    const buttons = [...document.querySelectorAll('.tabs button')]
+
+    function activate(id) {
+      buttons.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === id))
+      panels.forEach((panel) => panel.classList.toggle('active', panel.id === id))
+      history.replaceState(null, '', '#' + id)
+    }
+
+    buttons.forEach((btn) => btn.addEventListener('click', () => activate(btn.dataset.tab)))
+
+    const fromHash = location.hash.replace('#', '')
+    if (['ru', 'en', 'blocks'].includes(fromHash)) activate(fromHash)
+
+    document.querySelectorAll('.copy').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const pre = document.getElementById(btn.dataset.copy)
+        const text = pre.innerText
+        try {
+          await navigator.clipboard.writeText(text)
+          btn.textContent = 'OK'
+          setTimeout(() => { btn.textContent = 'Copy' }, 1200)
+        } catch {
+          const range = document.createRange()
+          range.selectNodeContents(pre)
+          const sel = window.getSelection()
+          sel.removeAllRanges()
+          sel.addRange(range)
+        }
+      })
+    })
+  </script>
+</body>
+</html>

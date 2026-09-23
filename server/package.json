@@ -8,6 +8,7 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "nanoid": "^5.0.7",
+    "nodemailer": "6.9.15",
     "socket.io": "^4.7.5"
   },
   "devDependencies": {
@@ -18,5 +19,4 @@
     "dev": "nodemon",
     "start": "node index.js"
   }
-
 }

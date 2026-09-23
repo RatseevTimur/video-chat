@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="360" viewBox="0 0 920 360" role="img" aria-label="Architecture">
+  <rect width="920" height="360" fill="#0f1115"/>
+  <text x="40" y="42" fill="#8ab4f8" font-family="system-ui,sans-serif" font-size="18" font-weight="700">Architecture · @E8B5:BC@0</text>
+
+  <rect x="40" y="80" width="200" height="120" rx="16" fill="#1b1f27" stroke="#3c4043"/>
+  <text x="140" y="130" text-anchor="middle" fill="#e8eaed" font-family="system-ui,sans-serif" font-size="16" font-weight="700">Browser</text>
+  <text x="140" y="155" text-anchor="middle" fill="#9aa0a6" font-family="system-ui,sans-serif" font-size="13">E2E keys + masks</text>
+  <text x="140" y="175" text-anchor="middle" fill="#9aa0a6" font-family="system-ui,sans-serif" font-size="13">;NG8 2 1@0C75@5</text>
+
+  <rect x="360" y="80" width="200" height="120" rx="16" fill="#1b1f27" stroke="#3c4043"/>
+  <text x="460" y="130" text-anchor="middle" fill="#e8eaed" font-family="system-ui,sans-serif" font-size="16" font-weight="700">Your VPS</text>
+  <text x="460" y="155" text-anchor="middle" fill="#9aa0a6" font-family="system-ui,sans-serif" font-size="13">RAM only · no DB</text>
+  <text x="460" y="175" text-anchor="middle" fill="#9aa0a6" font-family="system-ui,sans-serif" font-size="13">">;L:> RAM</text>
+
+  <rect x="680" y="80" width="200" height="120" rx="16" fill="#1b1f27" stroke="#3c4043"/>
+  <text x="780" y="130" text-anchor="middle" fill="#e8eaed" font-family="system-ui,sans-serif" font-size="16" font-weight="700">Family</text>
+  <text x="780" y="155" text-anchor="middle" fill="#9aa0a6" font-family="system-ui,sans-serif" font-size="13">Invite link</text>
+  <text x="780" y="175" text-anchor="middle" fill="#9aa0a6" font-family="system-ui,sans-serif" font-size="13">!AK;:0 invite</text>
+
+  <path d="M250 140 H350" stroke="#1e8e3e" stroke-width="3" marker-end="url(#a)"/>
+  <path d="M570 140 H670" stroke="#1a73e8" stroke-width="3" marker-end="url(#a)"/>
+  <path d="M140 210 C140 280 780 280 780 210" fill="none" stroke="#f9ab00" stroke-width="3" stroke-dasharray="8 6"/>
+  <text x="460" y="310" text-anchor="middle" fill="#f9ab00" font-family="system-ui,sans-serif" font-size="14">WebRTC video P2P · 2845> =0?@O<CN</text>
+  <text x="460" y="335" text-anchor="middle" fill="#9aa0a6" font-family="system-ui,sans-serif" font-size="13">Server sees ciphertext only · A5@25@ 2848B B>;L:> H8D@>B5:AB</text>
+
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#8ab4f8"/>
+    </marker>
+  </defs>
+</svg>

@@ -12,8 +12,9 @@
     "client:install": "cd client && yarn",
     "client:build": "cd client && yarn build",
     "server:install": "cd server && yarn",
-    "start": "cd server && node index.js",
-    "mvp": "yarn client:build && yarn start",
+    "start": "bash ./start.sh",
+    "start:server": "cd server && node index.js",
+    "mvp": "bash ./start.sh",
     "mvp:dev": "yarn dev"
   }
 }
