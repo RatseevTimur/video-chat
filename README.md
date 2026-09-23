@@ -77,11 +77,13 @@ chmod +x start.sh
 ### Что появится в терминале / Terminal output
 
 ```text
-→ http://ВАШ_IP:4000/?invite=XXXX
+→ https://ВАШ_IP:4000/?invite=XXXX
 ```
 
-Эту ссылку отправьте семье.  
-Share this link with family.
+Браузер предупредит о сертификате (self-signed) — это нормально:  
+**Дополнительно → Перейти на сайт**. По `http://` Chrome ломает камеру и шифрование.
+
+Share the **https://** link. Accept the certificate warning (Advanced → Proceed).
 
 Порт (если ufw включён, `start.sh` попробует открыть сам):
 

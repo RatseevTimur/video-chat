@@ -40,7 +40,7 @@ export function getPort() {
   return PORT
 }
 
-export function listLanUrls(port = PORT) {
+export function listLanUrls(port = PORT, protocol = 'https') {
   const urls = []
   try {
     const nets = networkInterfaces()
@@ -48,37 +48,45 @@ export function listLanUrls(port = PORT) {
       for (const item of list || []) {
         if (item.family !== 'IPv4' && item.family !== 4) continue
         if (item.internal) continue
-        urls.push(`http://${item.address}:${port}`)
+        urls.push(`${protocol}://${item.address}:${port}`)
       }
     }
   } catch {
     // sandbox / restricted hosts may block os.networkInterfaces()
   }
-  if (!urls.length) urls.push(`http://127.0.0.1:${port}`)
+  if (!urls.length) urls.push(`${protocol}://127.0.0.1:${port}`)
   return [...new Set(urls)]
 }
 
-export function printBanner() {
-  const urls = listLanUrls(PORT)
+export function printBanner(protocol = 'https') {
+  const urls = listLanUrls(PORT, protocol)
   const invitePaths = urls.map((base) => `${base}/?invite=${INVITE}`)
   const line = '═'.repeat(56)
+  const certNote = protocol === 'https'
+    ? `
+  Browser will warn about the certificate (self-signed).
+  Click Advanced → Proceed / Принять риск — это нормально.
+`
+    : `
+  WARNING: plain HTTP. Chrome blocks camera + crypto on http://IP.
+  Install openssl and restart for HTTPS.
+`
   console.log(`
 ${line}
   Family Chat  ·  zero-config  ·  RAM only (no database)
 ${line}
-  Local:   http://127.0.0.1:${PORT}/?invite=${INVITE}
+  Local:   ${protocol}://127.0.0.1:${PORT}/?invite=${INVITE}
 
   Share this invite link with family / friends:
 ${invitePaths.map((u) => `  → ${u}`).join('\n')}
 
   Invite code (if they open the site without link):
   → ${INVITE}
-
-  Notes / Важно:
-  • No .env needed. Restart clears chats/users (by design).
-  • Messages are E2E encrypted in the browser.
-  • Server only keeps ciphertext in memory.
-  • Email is just an ID — no Yandex password, no SMTP.
+${certNote}
+  Notes:
+  • Restart clears chats/users in RAM (by design).
+  • E2E keys stay in the browser.
+  • No Yandex password / no SMTP.
 ${line}
 `)
 }

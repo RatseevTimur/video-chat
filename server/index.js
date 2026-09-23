@@ -1,5 +1,6 @@
 import express from 'express'
-import { createServer } from 'http'
+import { createServer as createHttpServer } from 'http'
+import { createServer as createHttpsServer } from 'https'
 import { dirname, join } from 'path'
 import { Server } from 'socket.io'
 import { fileURLToPath } from 'url'
@@ -7,10 +8,10 @@ import { fileURLToPath } from 'url'
 import { attachApi } from './utils/api.js'
 import initSocket from './utils/initSocket.js'
 import { getPort, printBanner } from './utils/messenger.js'
+import { ensureTls } from './utils/tls.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
-const server = createServer(app)
 const port = getPort()
 
 app.disable('x-powered-by')
@@ -32,7 +33,7 @@ app.get('/api/ice', (_req, res) => {
 })
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mode: 'ram' })
+  res.json({ ok: true, mode: 'ram', secure: true })
 })
 
 app.use(express.static(join(__dirname, '../client/dist')))
@@ -42,6 +43,17 @@ app.get('*', (req, res, next) => {
   res.sendFile(join(__dirname, '../client/dist/index.html'))
 })
 
+let server
+let protocol = 'https'
+try {
+  const tls = ensureTls()
+  server = createHttpsServer(tls, app)
+} catch (error) {
+  console.warn('HTTPS unavailable (openssl?), falling back to HTTP:', error.message)
+  server = createHttpServer(app)
+  protocol = 'http'
+}
+
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   serveClient: false
@@ -50,5 +62,5 @@ const io = new Server(server, {
 io.on('connection', initSocket)
 
 server.listen(port, '0.0.0.0', () => {
-  printBanner()
+  printBanner(protocol)
 })

@@ -16,6 +16,11 @@ const fromB64 = (text) => {
 }
 
 export async function loadOrCreateKeys() {
+  if (!globalThis.crypto?.subtle) {
+    throw new Error(
+      'Нужен HTTPS (откройте https://… ссылку из терминала). / Open the https:// invite link from the server.'
+    )
+  }
   const saved = localStorage.getItem(KEYS)
   if (saved) return JSON.parse(saved)
   const pair = await crypto.subtle.generateKey(ECDH, true, ['deriveKey'])

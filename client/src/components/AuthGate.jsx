@@ -78,12 +78,14 @@ const AuthGate = ({ children }) => {
         <p className="eyebrow">Invite + E2E · без SMTP</p>
         <h1>Семейный чат</h1>
         <p className="lead">
-          Откройте invite-ссылку с сервера (её печатает терминал). Почта — только
-          ваш ID. Пароль от Яндекса не нужен. Сообщения шифруются на устройстве.
+          Откройте <strong>https://</strong> invite-ссылку с сервера. Браузер
+          покажет предупреждение о сертификате — нажмите «Дополнительно» →
+          «Перейти». По HTTP камера и шифрование в Chrome не работают.
         </p>
         <p className="lead en">
-          Use the invite link printed by the server. Email is identity only.
-          No mailbox password. Messages are encrypted on your device.
+          Use the <strong>https://</strong> invite from the server terminal.
+          Accept the self-signed certificate warning. Plain HTTP breaks camera
+          and Web Crypto in Chrome.
         </p>
 
         <form onSubmit={join}>
