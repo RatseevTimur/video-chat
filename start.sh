@@ -71,8 +71,6 @@ if [ ! -d client/node_modules/@mediapipe/tasks-vision ]; then
   yarn --cwd client add @mediapipe/tasks-vision@1.0.1 || true
 fi
 
-yarn --cwd client build
-
 if have ufw && as_root ufw status 2>/dev/null | grep -qi active; then
   as_root ufw allow 4000/tcp || true
 fi
@@ -103,13 +101,9 @@ export PORT INVITE
 if [ "${TUNNEL:-1}" = "1" ]; then ensure_cloudflared; fi
 
 echo ""
-echo "==> FREE MODE: anyone with a room link joins (no email)"
-echo "    Optional family messenger: /family (invite=$INVITE)"
-if [ -n "${MAIL_URL:-}" ]; then
-  echo "==> MAIL_URL set (only used for /family)"
-else
-  echo "==> MAIL_URL empty (ok for free mode)"
-fi
+echo "==> FREE MEET MODE (no email) — rebuild client"
+rm -rf client/dist
+yarn --cwd client build
 echo "==> Starting server"
 yarn --cwd server start &
 SERVER_PID=$!

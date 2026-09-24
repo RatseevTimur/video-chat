@@ -79,6 +79,11 @@ const Room = () => {
         setRoomInfo(info)
         setChat(Array.isArray(chat) ? chat : [])
         setError('')
+        const link = `${window.location.origin}/room/${roomId}`
+        navigator.clipboard?.writeText(link).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2500)
+        }).catch(() => {})
       })
       .on('roomError', ({ message }) => {
         setError(message)
@@ -345,13 +350,13 @@ const Room = () => {
           <BsArrowLeft /> Назад / Back
         </button>
         <div>
-          <h1>{isTextRoom ? 'Текстовый чат / Text room' : 'Комната / Room'} {roomId}</h1>
+          <h1>{isTextRoom ? 'Текстовый чат / Text room' : 'Встреча готова / Meeting ready'}</h1>
           <p>
-            {roomInfo?.participantCount || 0} участник(а) · сообщения не сохраняются
+            {roomInfo?.participantCount || 0} участник(а) · ссылка{copied ? ' скопирована ✓' : ': нажмите «Ссылка»'}
           </p>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={copyLink}>
-          {copied ? <BsCheck /> : <BsCopy />} Ссылка / Link
+        <button type="button" className="btn btn-success" onClick={copyLink}>
+          {copied ? <BsCheck /> : <BsCopy />} {copied ? 'Скопировано!' : 'Скопировать ссылку / Copy link'}
         </button>
       </header>
 

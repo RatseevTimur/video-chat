@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { api, getSession, setSession } from '../utils/auth'
 import { exportBackup, loadOrCreateKeys } from '../utils/e2e'
@@ -104,20 +104,23 @@ const AuthGate = ({ children }) => {
   return (
     <div className="landing">
       <div className="landing-card">
-        <p className="eyebrow">Invite + подтверждение почты / Email verified</p>
-        <h1>Семейный чат</h1>
+        <Link
+          to="/"
+          className="btn btn-success"
+          style={{ display: 'block', textAlign: 'center', marginBottom: '1.25rem', textDecoration: 'none' }}
+        >
+          ← Созвон без почты (как Meet) / Call without email
+        </Link>
+
+        <p className="eyebrow">Опционально: семейный чат / Optional family chat</p>
+        <h1>Вход по почте</h1>
         <p className="lead">
-          Вход: только почта + код. После входа чат идёт в памяти (E2E), без
-          писем на каждое сообщение — если сервер без MAIL_URL.
-        </p>
-        <p className="lead en">
-          Sign-in: email + code only. After that, chat stays in RAM (E2E).
-          Per-message mail is used only when MAIL_URL is configured (mail-as-DB).
+          Это НЕ для обычного созвона. Для видеозвонка нажмите зелёную кнопку выше.
         </p>
         <p className="lead">
           {mailStore
-            ? '✓ Режим B: почта = авторизация + «БД» (уведомления и шифротекст в письмах)'
-            : '✓ Режим A: почта только для кода входа; сообщения только в RAM / сокете'}
+            ? '✓ Режим B: почта = авторизация + «БД»'
+            : '✓ Режим A: почта только для кода входа'}
         </p>
         <p className="lead">
           {mailOn
@@ -139,7 +142,7 @@ const AuthGate = ({ children }) => {
               <span>Почта / Email</span>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ivanov@yandex.ru" />
             </label>
-            <button type="submit" className="btn btn-success" disabled={busy}>
+            <button type="submit" className="btn btn-outline" disabled={busy}>
               Получить код / Get code
             </button>
           </form>
@@ -150,7 +153,7 @@ const AuthGate = ({ children }) => {
               <span>Код из письма / Code from email</span>
               <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" placeholder="123456" required />
             </label>
-            <button type="submit" className="btn btn-success" disabled={busy}>
+            <button type="submit" className="btn btn-outline" disabled={busy}>
               Подтвердить / Verify
             </button>
             <button type="button" className="btn btn-outline" disabled={busy} onClick={() => setStep('form')}>
@@ -158,7 +161,6 @@ const AuthGate = ({ children }) => {
             </button>
           </form>
         )}
-
         {error && <div className="error">{error}</div>}
       </div>
     </div>

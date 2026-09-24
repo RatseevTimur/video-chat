@@ -34,13 +34,22 @@ app.get('/api/ice', (_req, res) => {
 })
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mode: 'ram', secure: true })
+  res.json({ ok: true, mode: 'free', version: 'free-meet-v2', secure: true })
 })
 
-app.use(express.static(join(__dirname, '../client/dist')))
+app.use(express.static(join(__dirname, '../client/dist'), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.html')) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    } else if (/\.[a-f0-9]{8}\.(js|css)$/i.test(filePath) || filePath.includes('/assets/')) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+    }
+  }
+}))
 
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next()
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
   res.sendFile(join(__dirname, '../client/dist/index.html'))
 })
 

@@ -1,67 +1,65 @@
 import { useState } from 'react'
-import { BsBoxArrowInRight, BsCameraVideo, BsChatDots, BsPlus } from 'react-icons/bs'
-import { Link, useNavigate } from 'react-router-dom'
+import { BsCameraVideo, BsLink45Deg } from 'react-icons/bs'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
 
+/** Google Meet–style: name + one click → shareable room link. No email. */
 const RoomManager = () => {
   const navigate = useNavigate()
-  const [name, setName] = useState(getStoredName())
-  const [joinId, setJoinId] = useState('')
+  const [params] = useSearchParams()
+  const [name, setName] = useState(getStoredName() || 'Гость')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const rememberName = () => setStoredName(name)
+  // Old bookmarks /?invite=… must NOT open email form — stay in free mode
+  const legacyInvite = params.get('invite')
 
-  const createRoom = (type) => {
+  const rememberName = () => setStoredName(name.trim() || 'Гость')
+
+  const startMeeting = () => {
     rememberName()
     setBusy(true)
     setError('')
-
-    const onCreated = ({ roomId }) => {
-      socket.off('roomCreated', onCreated)
-      socket.off('roomError', onError)
-      navigate(`/room/${roomId}`)
-    }
-    const onError = ({ message }) => {
-      socket.off('roomCreated', onCreated)
-      socket.off('roomError', onError)
-      setError(message)
-      setBusy(false)
-    }
 
     const timer = setTimeout(() => {
       socket.off('roomCreated', onCreated)
       socket.off('roomError', onError)
       setBusy(false)
       setError('Нет связи с сервером / Cannot reach the server')
-    }, 5000)
+    }, 8000)
 
-    const onCreatedWrapped = (payload) => {
+    const onCreated = ({ roomId }) => {
       clearTimeout(timer)
-      onCreated(payload)
+      socket.off('roomCreated', onCreated)
+      socket.off('roomError', onError)
+      navigate(`/room/${roomId}`)
     }
-    const onErrorWrapped = (payload) => {
+    const onError = ({ message }) => {
       clearTimeout(timer)
-      onError(payload)
+      socket.off('roomCreated', onCreated)
+      socket.off('roomError', onError)
+      setError(message || 'Ошибка')
+      setBusy(false)
     }
 
-    socket.once('roomCreated', onCreatedWrapped)
-    socket.once('roomError', onErrorWrapped)
-    const emitCreate = () => socket.emit('createRoom', { type, name })
-    if (socket.connected) emitCreate()
+    socket.once('roomCreated', onCreated)
+    socket.once('roomError', onError)
+    const emit = () => socket.emit('createRoom', { type: 'video', name: name.trim() || 'Гость' })
+    if (socket.connected) emit()
     else {
-      socket.once('connect', emitCreate)
+      socket.once('connect', emit)
       socket.connect()
     }
   }
 
-  const joinRoom = (event) => {
+  const joinFromPaste = (event) => {
     event.preventDefault()
-    const roomId = joinId.trim().replace(/^.*\/room\//, '').split(/[?#]/)[0]
+    const raw = new FormData(event.target).get('code')
+    const roomId = String(raw || '').trim().replace(/^.*\/room\//, '').split(/[?#]/)[0]
     if (!roomId) {
-      setError('Введите код или ссылку комнаты / Enter room code or link')
+      setError('Вставьте ссылку или код / Paste link or code')
       return
     }
     rememberName()
@@ -71,61 +69,58 @@ const RoomManager = () => {
   return (
     <div className="landing">
       <div className="landing-card">
-        <p className="eyebrow">Свободный режим / Open link mode</p>
-        <h1>Video Chat</h1>
+        <p className="eyebrow">Как Google Meet · без почты</p>
+        <h1>Новая встреча</h1>
         <p className="lead">
-          Создайте комнату → скопируйте ссылку → отправьте родственникам.
-          Кто откроет ссылку — сразу в созвоне. Без почты и паролей.
+          Нажмите кнопку → получите ссылку → отправьте кому угодно.
+          Кто откроет ссылку — сразу в комнате.
         </p>
         <p className="lead en">
-          Create a room, copy the link, send it. Anyone with the link joins.
-          No email, no passwords.
+          One click → share the link → anyone joins. No email.
         </p>
+
+        {legacyInvite && (
+          <p className="lead" style={{ color: '#0b57d0' }}>
+            Старая invite-ссылка больше не нужна. Просто создайте встречу ниже.
+          </p>
+        )}
 
         <label className="field">
           <span>Ваше имя / Your name</span>
           <input
             value={name}
             maxLength={24}
-            placeholder="Анна, Саша..."
-            onChange={(event) => setName(event.target.value)}
+            placeholder="Анна"
+            onChange={(e) => setName(e.target.value)}
             onBlur={rememberName}
+            onKeyDown={(e) => e.key === 'Enter' && startMeeting()}
           />
         </label>
 
         <div className="landing-actions">
-          <button type="button" className="btn btn-success" disabled={busy} onClick={() => createRoom('video')}>
-            <BsCameraVideo /> <BsPlus /> Создать видеозвонок / Create video call
-          </button>
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => createRoom('text')}>
-            <BsChatDots /> <BsPlus /> Текстовый чат / Text room
+          <button
+            type="button"
+            className="btn btn-success"
+            disabled={busy}
+            onClick={startMeeting}
+            style={{ fontSize: '1.1rem', padding: '0.9rem 1.2rem' }}
+          >
+            <BsCameraVideo /> {busy ? 'Создаём…' : 'Начать встречу / Start meeting'}
           </button>
         </div>
 
-        <form className="join-form" onSubmit={joinRoom}>
-          <input
-            value={joinId}
-            onChange={(event) => {
-              setJoinId(event.target.value)
-              setError('')
-            }}
-            placeholder="Код или ссылка / Code or paste link"
-          />
+        <form className="join-form" onSubmit={joinFromPaste}>
+          <input name="code" placeholder="Или вставьте ссылку комнаты / Paste room link" />
           <button type="submit" className="btn btn-primary">
-            <BsBoxArrowInRight /> Войти / Join
+            <BsLink45Deg /> Войти / Join
           </button>
         </form>
 
         {error && <div className="error">{error}</div>}
 
-        <ul className="landing-notes">
-          <li>В комнате нажмите «Ссылка» и отправьте её кому угодно.</li>
-          <li>Маски считаются на устройстве и уже встроены в видео.</li>
-          <li>
-            Семейный чат с почтой (опционально):{' '}
-            <Link to="/family">/family</Link>
-          </li>
-        </ul>
+        <p className="lead" style={{ marginTop: '1.5rem', fontSize: '0.85rem', opacity: 0.7 }}>
+          Семейный чат с почтой (не для созвона): <Link to="/family">/family</Link>
+        </p>
       </div>
     </div>
   )
