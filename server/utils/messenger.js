@@ -188,7 +188,8 @@ export async function startAuth({ invite, email, name, publicJwk }) {
     delivered: Boolean(sent.delivered),
     hint: sent.delivered
       ? 'Код отправлен на почту / Code sent to email'
-      : 'MAIL_URL не задан: код в терминале сервера / No MAIL_URL: code is in the server terminal'
+      : (sent.hint
+        || 'MAIL_URL не задан: код в терминале сервера / No MAIL_URL: code is in the server terminal')
   }
 }
 
