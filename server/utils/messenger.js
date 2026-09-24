@@ -81,25 +81,26 @@ export function listLanUrls(port = PORT, protocol = 'https') {
 
 export function printBanner(protocol = 'https') {
   const urls = listLanUrls(PORT, protocol)
-  const invitePaths = urls.map((base) => `${base}/?invite=${INVITE}`)
+  const openPaths = urls.map((base) => `${base}/`)
+  const familyPaths = urls.map((base) => `${base}/family?invite=${INVITE}`)
   const line = '═'.repeat(56)
   const mailNote = mailStoreEnabled()
-    ? '  Mode B: MAIL_URL — OTP by email + mailbox store for messages\n'
+    ? '  Family /family: Mode B — OTP by email + mailbox store\n'
     : mailConfigured()
-      ? '  Mode A+: MAIL_URL — OTP by email only; chat in RAM (MAIL_STORE=0)\n'
-      : '  Mode A: no MAIL_URL — OTP in this terminal; chat only in RAM\n'
+      ? '  Family /family: Mode A+ — OTP by email; chat in RAM\n'
+      : '  Family /family: Mode A — OTP in this terminal (optional)\n'
   const tunnelNote = PUBLIC_URL
-    ? `  Public HTTPS (trusted cert): ${PUBLIC_URL}/?invite=${INVITE}\n`
-    : '  Tip: run with Cloudflare tunnel for a green-lock random https URL\n'
+    ? `  Public HTTPS: ${PUBLIC_URL}/\n`
+    : '  Tip: Cloudflare tunnel gives a green-lock https URL\n'
   console.log(`
 ${line}
-  Family Chat  ·  RAM only  ·  E2E
+  Video Chat  ·  FREE MODE (no email)
 ${line}
-${tunnelNote}  Local:   ${protocol}://127.0.0.1:${PORT}/?invite=${INVITE}
+${tunnelNote}  Open lobby (create link & share):
+${openPaths.map((u) => `  → ${u}`).join('\n')}
 
-  Share:
-${invitePaths.map((u) => `  → ${u}`).join('\n')}
-
+  Optional family messenger (email OTP):
+${familyPaths.map((u) => `  → ${u}`).join('\n')}
   Invite code: ${INVITE}
 ${mailNote}
   Self-signed IP links need Advanced → Proceed in the browser.

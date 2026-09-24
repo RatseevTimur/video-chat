@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BsBoxArrowInRight, BsCameraVideo, BsChatDots, BsPlus } from 'react-icons/bs'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
@@ -59,9 +59,9 @@ const RoomManager = () => {
 
   const joinRoom = (event) => {
     event.preventDefault()
-    const roomId = joinId.trim()
+    const roomId = joinId.trim().replace(/^.*\/room\//, '').split(/[?#]/)[0]
     if (!roomId) {
-      setError('Введите код комнаты / Enter a room code')
+      setError('Введите код или ссылку комнаты / Enter room code or link')
       return
     }
     rememberName()
@@ -71,15 +71,15 @@ const RoomManager = () => {
   return (
     <div className="landing">
       <div className="landing-card">
-        <p className="eyebrow">Легковесный Meet с масками / Lightweight Meet + masks</p>
+        <p className="eyebrow">Свободный режим / Open link mode</p>
         <h1>Video Chat</h1>
         <p className="lead">
-          Без базы данных, без истории. Видео идёт напрямую (WebRTC), чат живёт
-          только пока активен звонок.
+          Создайте комнату → скопируйте ссылку → отправьте родственникам.
+          Кто откроет ссылку — сразу в созвоне. Без почты и паролей.
         </p>
         <p className="lead en">
-          No database and no history. Video is peer-to-peer. Chat is wiped when
-          everyone hangs up. The room stays.
+          Create a room, copy the link, send it. Anyone with the link joins.
+          No email, no passwords.
         </p>
 
         <label className="field">
@@ -95,7 +95,7 @@ const RoomManager = () => {
 
         <div className="landing-actions">
           <button type="button" className="btn btn-success" disabled={busy} onClick={() => createRoom('video')}>
-            <BsCameraVideo /> <BsPlus /> Видеокомната / Video room
+            <BsCameraVideo /> <BsPlus /> Создать видеозвонок / Create video call
           </button>
           <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => createRoom('text')}>
             <BsChatDots /> <BsPlus /> Текстовый чат / Text room
@@ -109,7 +109,7 @@ const RoomManager = () => {
               setJoinId(event.target.value)
               setError('')
             }}
-            placeholder="Код комнаты / Room code"
+            placeholder="Код или ссылка / Code or paste link"
           />
           <button type="submit" className="btn btn-primary">
             <BsBoxArrowInRight /> Войти / Join
@@ -119,9 +119,12 @@ const RoomManager = () => {
         {error && <div className="error">{error}</div>}
 
         <ul className="landing-notes">
-          <li>Откройте ссылку комнаты у родственника — ему придёт входящий звонок на сайте.</li>
-          <li>Маски считаются на вашем устройстве и уходят уже в видео.</li>
-          <li>Для сложных сетей добавьте TURN в `.env` сервера.</li>
+          <li>В комнате нажмите «Ссылка» и отправьте её кому угодно.</li>
+          <li>Маски считаются на устройстве и уже встроены в видео.</li>
+          <li>
+            Семейный чат с почтой (опционально):{' '}
+            <Link to="/family">/family</Link>
+          </li>
         </ul>
       </div>
     </div>

@@ -117,9 +117,13 @@ export default function App() {
   return (
     <div className="app">
       <Routes>
-        <Route path="/" element={<AuthGate><Messenger /></AuthGate>} />
-        <Route path="/chat/:chatId" element={<AuthGate><Messenger /></AuthGate>} />
+        {/* Free mode (default): anyone with a room link joins — no email */}
+        <Route path="/" element={<RoomManager />} />
         <Route path="/guest" element={<RoomManager />} />
+        {/* Optional family messenger with email OTP */}
+        <Route path="/family" element={<AuthGate><Messenger /></AuthGate>} />
+        <Route path="/family/chat/:chatId" element={<AuthGate><Messenger /></AuthGate>} />
+        <Route path="/chat/:chatId" element={<AuthGate><Messenger /></AuthGate>} />
         <Route path="/masks" element={<MaskModule />} />
         <Route path="/call" element={<CallPage />} />
         <Route path="/room/:roomId" element={<Room />} />

@@ -53,18 +53,15 @@ export function attachApi(app) {
   app.get('/api/bootstrap', (_req, res) => {
     const status = mailStatus()
     res.json({
+      freeMode: true,
       mail: mailConfigured(),
       mailStore: mailStoreEnabled(),
       mailStatus: status,
-      mode: mailStoreEnabled() ? 'mail-db' : (mailConfigured() ? 'mail-auth' : 'ram-auth'),
+      mode: 'free',
       publicUrl: getPublicUrl() || null,
       inviteHint: true,
       urls: listLanUrls(),
-      note: mailStoreEnabled()
-        ? 'Mode B: email OTP + ciphertext in mail.'
-        : mailConfigured()
-          ? 'Mode A+: email OTP only; messages in RAM.'
-          : 'Mode A: console OTP; messages in RAM. Set MAIL_URL to send real email.'
+      note: 'Free mode: create a room link and share it. Optional /family for email OTP messenger.'
     })
   })
 

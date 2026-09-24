@@ -98,23 +98,19 @@ export PORT INVITE
 [ -n "${MAIL_URL:-}" ] && export MAIL_URL
 [ -n "${MAIL_STORE:-}" ] && export MAIL_STORE
 [ -n "${SMTP_FROM:-}" ] && export SMTP_FROM
+[ -n "${OPEN_ROOM:-}" ] && export OPEN_ROOM
 
 if [ "${TUNNEL:-1}" = "1" ]; then ensure_cloudflared; fi
 
 echo ""
+echo "==> FREE MODE: anyone with a room link joins (no email)"
+echo "    Optional family messenger: /family (invite=$INVITE)"
 if [ -n "${MAIL_URL:-}" ]; then
-  echo "==> MAIL_URL set → codes go to email (SMTP)"
-  if [ "${MAIL_STORE:-1}" = "0" ]; then
-    echo "    Mode A+: auth by email, chat in RAM"
-  else
-    echo "    Mode B: auth + mail store for messages"
-  fi
+  echo "==> MAIL_URL set (only used for /family)"
 else
-  echo "==> MAIL_URL empty → codes print HERE in this terminal (not inbox)"
-  echo "    To send real email, put in server/.env:"
-  echo "    MAIL_URL='smtps://login%40yandex.ru:APP_PASSWORD@smtp.yandex.ru:465'"
+  echo "==> MAIL_URL empty (ok for free mode)"
 fi
-echo "==> Starting server (invite=$INVITE)"
+echo "==> Starting server"
 yarn --cwd server start &
 SERVER_PID=$!
 
@@ -139,8 +135,15 @@ if [ -n "$BIN" ] && [ "${TUNNEL:-1}" = "1" ]; then
       -d "{\"invite\":\"${INVITE}\",\"url\":\"${PUBLIC}\"}" >/dev/null 2>&1 || true
     echo ""
     echo "════════════════════════════════════════════════════════"
-    echo "  ОТКРОЙТЕ ЭТУ ССЫЛКУ (зелёный замок) / TRUSTED LINK:"
-    echo "  → ${PUBLIC}/?invite=${INVITE}"
+    echo "  СВОБОДНЫЙ РЕЖИМ — откройте и создайте ссылку:"
+    echo "  → ${PUBLIC}/"
+    echo ""
+    echo "  Или сразу общая комната (все по одной ссылке):"
+    OPEN_ROOM="${OPEN_ROOM:-$(openssl rand -hex 4)}"
+    echo "  → ${PUBLIC}/room/${OPEN_ROOM}"
+    echo ""
+    echo "  Family (email OTP, optional):"
+    echo "  → ${PUBLIC}/family?invite=${INVITE}"
     echo "════════════════════════════════════════════════════════"
     echo ""
   fi

@@ -9,8 +9,8 @@
   <img src="./docs/assets/hero-banner.png" alt="Family Chat" width="920" />
 </p>
 
-**RU:** Свой семейный мессенджер + видеозвонки с масками. Без базы данных. Без SMTP.  
-**EN:** Self-hosted family messenger + masked video calls. No database. No SMTP.
+**RU:** Свободный режим: создали ссылку → любой по ней в созвоне (без почты). Опционально `/family` с OTP.  
+**EN:** Free mode: create a link → anyone joins the call (no email). Optional `/family` with OTP.
 
 `./start.sh` **сам ставит Node.js 20**, если его нет (Ubuntu/Debian).
 
@@ -29,7 +29,7 @@
 |---|----|----|
 | 1 | Скачиваете репо | Download the repo |
 | 2 | `./start.sh` (Node ставится сам) | `./start.sh` (auto-installs Node) |
-| 3 | Раздаёте invite-ссылку из терминала | Share the invite link from the terminal |
+| 3 | Открываете ссылку из терминала → «Создать видеозвонок» → шлёте ссылку комнаты | Open the terminal link → Create video call → share the room URL |
 
 <p align="center">
   <img src="./docs/assets/architecture.svg" alt="Architecture" width="920" />
