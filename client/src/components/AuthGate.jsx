@@ -124,16 +124,25 @@ const AuthGate = ({ children }) => {
         </p>
         <p className="lead">
           {mailOn
-            ? 'Код придёт на почту / Code arrives by email'
-            : 'Код смотрите в терминале сервера / Code is in the server terminal'}
+            ? '✓ SMTP настроен: код уйдёт на почту'
+            : '⚠ MAIL_URL не задан: код только в терминале сервера (письмо не отправится)'}
         </p>
 
         {step === 'form' ? (
           <form onSubmit={start}>
-            <label className="field">
-              <span>Invite-код / Invite</span>
-              <input required value={invite} onChange={(e) => setInvite(e.target.value)} />
-            </label>
+            {invite ? (
+              <p className="lead" style={{ color: '#81c995' }}>
+                ✓ Invite из ссылки — руками вводить не нужно
+              </p>
+            ) : (
+              <div className="error">
+                Откройте ссылку из терминала сервера:
+                <br />
+                <code>…/family?invite=XXXX</code>
+                <br />
+                Invite не вводят от руки — он уже в ссылке.
+              </div>
+            )}
             <label className="field">
               <span>Имя / Name</span>
               <input value={name} maxLength={24} onChange={(e) => setName(e.target.value)} placeholder="Мама" />
@@ -142,7 +151,7 @@ const AuthGate = ({ children }) => {
               <span>Почта / Email</span>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ivanov@yandex.ru" />
             </label>
-            <button type="submit" className="btn btn-outline" disabled={busy}>
+            <button type="submit" className="btn btn-outline" disabled={busy || !invite}>
               Получить код / Get code
             </button>
           </form>
