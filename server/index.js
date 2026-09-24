@@ -34,7 +34,7 @@ app.get('/api/ice', (_req, res) => {
 })
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mode: 'free', version: 'meet-mesh-v3', secure: true })
+  res.json({ ok: true, mode: 'free', version: 'meet-mesh-v4', secure: true })
 })
 
 app.use(express.static(join(__dirname, '../client/dist'), {

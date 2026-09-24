@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BsCheck, BsCopy } from 'react-icons/bs'
 
-const InCallChat = ({ messages, onSend, localId, title, hint }) => {
+const InCallChat = ({ messages, onSend, localId, title, hint, onClose }) => {
   const [text, setText] = useState('')
   const [copiedId, setCopiedId] = useState('')
   const listRef = useRef(null)
@@ -48,9 +48,16 @@ const InCallChat = ({ messages, onSend, localId, title, hint }) => {
           <h3>{title || 'Чат / Chat'}</h3>
           <p>{hint || 'Сообщения живут только пока активен звонок.'}</p>
         </div>
-        <button type="button" className="btn btn-small" onClick={copyAll} disabled={!messages.length}>
-          {copiedId === 'all' ? <BsCheck /> : <BsCopy />}
-        </button>
+        <div className="chat-head-actions">
+          <button type="button" className="btn btn-small" onClick={copyAll} disabled={!messages.length}>
+            {copiedId === 'all' ? <BsCheck /> : <BsCopy />}
+          </button>
+          {onClose && (
+            <button type="button" className="btn btn-small btn-outline" onClick={onClose}>
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="chat-list" ref={listRef}>

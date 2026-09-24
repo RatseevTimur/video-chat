@@ -5,15 +5,34 @@ import { getMaskById, loadMaskImage } from './masks'
 const WASM_URL = '/mediapipe/wasm'
 const MODEL_URL = '/models/blaze_face_short_range.tflite'
 const DETECT_WIDTH = 320
-const SMOOTH = 0.38
+const SMOOTH = 0.28
+const OUT_W = 640
+const OUT_H = 480
 
 const emptyPose = () => ({
   x: 0.5,
-  y: 0.5,
+  y: 0.38,
   scale: 0,
   rotation: 0,
   visible: 0
 })
+
+function coverCrop(srcW, srcH, dstW, dstH, faceX, faceY) {
+  const srcAspect = srcW / srcH
+  const dstAspect = dstW / dstH
+  let cropW
+  let cropH
+  if (srcAspect > dstAspect) {
+    cropH = srcH
+    cropW = srcH * dstAspect
+  } else {
+    cropW = srcW
+    cropH = srcW / dstAspect
+  }
+  const cx = Math.max(0, Math.min(srcW - cropW, faceX * srcW - cropW / 2))
+  const cy = Math.max(0, Math.min(srcH - cropH, faceY * srcH - cropH / 2))
+  return { x: cx, y: cy, w: cropW, h: cropH }
+}
 
 export default class MaskEngine {
   constructor() {
@@ -34,6 +53,7 @@ export default class MaskEngine {
     this.detectCanvas = document.createElement('canvas')
     this.detectCtx = this.detectCanvas.getContext('2d', { alpha: false })
     this.outputStream = null
+    this.crop = { x: 0, y: 0, w: 1, h: 1 }
   }
 
   async init() {
@@ -64,8 +84,8 @@ export default class MaskEngine {
     this.mask = getMaskById(id)
     this.maskImage = this.mask.src ? await loadMaskImage(this.mask) : null
     if (this.mask.id === 'none') {
-      this.pose = emptyPose()
-      this.target = emptyPose()
+      this.pose = { ...this.pose, scale: 0, rotation: 0, visible: this.pose.visible }
+      this.target = { ...this.target, scale: 0, rotation: 0 }
     }
     return this.mask
   }
@@ -132,19 +152,15 @@ export default class MaskEngine {
     const height = video.videoHeight
     if (!width || !height) return
 
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width
-      canvas.height = height
+    if (canvas.width !== OUT_W || canvas.height !== OUT_H) {
+      canvas.width = OUT_W
+      canvas.height = OUT_H
     }
-
-    ctx.drawImage(video, 0, 0, width, height)
-
-    if (!this.detector || this.mask.id === 'none') return
 
     if (video.currentTime !== this.lastVideoTime) {
       this.lastVideoTime = video.currentTime
       this.frame += 1
-      if (this.frame % 2 === 0) {
+      if (this.detector && this.frame % 2 === 0) {
         this.detect(video, width, height)
       }
     }
@@ -155,16 +171,25 @@ export default class MaskEngine {
     this.pose.rotation += (this.target.rotation - this.pose.rotation) * SMOOTH
     this.pose.visible += (this.target.visible - this.pose.visible) * SMOOTH
 
-    if (this.pose.visible < 0.12 || !this.maskImage) return
+    const faceX = this.pose.visible > 0.2 ? this.pose.x : 0.5
+    const faceY = this.pose.visible > 0.2 ? this.pose.y : 0.38
+    const crop = coverCrop(width, height, OUT_W, OUT_H, faceX, faceY)
+    this.crop = crop
+
+    ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, OUT_W, OUT_H)
+
+    if (this.mask.id === 'none' || !this.maskImage || this.pose.visible < 0.12) return
 
     const img = this.maskImage
-    const maskWidth = this.pose.scale * width
+    const maskWidth = (this.pose.scale * width) * (OUT_W / crop.w)
     const ratio = (img.height || img.naturalHeight) / (img.width || img.naturalWidth || 1)
     const maskHeight = maskWidth * ratio
+    const mx = ((this.pose.x * width) - crop.x) / crop.w * OUT_W
+    const my = ((this.pose.y * height) - crop.y) / crop.h * OUT_H
 
     ctx.save()
     ctx.globalAlpha = Math.min(1, this.pose.visible)
-    ctx.translate(this.pose.x * width, this.pose.y * height)
+    ctx.translate(mx, my)
     ctx.rotate(this.pose.rotation)
     ctx.drawImage(img, -maskWidth / 2, -maskHeight / 2, maskWidth, maskHeight)
     ctx.restore()
@@ -185,25 +210,28 @@ export default class MaskEngine {
       const result = this.detector.detectForVideo(this.detectCanvas, performance.now())
       const detection = result?.detections?.[0]
       if (!detection) {
-        this.target.visible = 0
+        this.target.visible = Math.max(0, this.target.visible - 0.15)
         return
       }
 
       const keypoints = indexKeypoints(detection.keypoints)
-      const left = keypoints.leftEye
-      const right = keypoints.rightEye
-      if (!left || !right) {
+      const a = keypoints.leftEye
+      const b = keypoints.rightEye
+      if (!a || !b) {
         this.target.visible = 0
         return
       }
 
+      // Image-space left/right — avoids ~180° rotate that flipped masks
+      const left = a.x <= b.x ? a : b
+      const right = a.x <= b.x ? b : a
       const dx = right.x - left.x
       const dy = right.y - left.y
       const dist = Math.hypot(dx, dy)
       this.target = {
         x: (left.x + right.x) / 2,
-        y: (left.y + right.y) / 2 + this.mask.offsetY,
-        scale: dist * this.mask.scale,
+        y: (left.y + right.y) / 2 + (this.mask.offsetY || 0),
+        scale: dist * (this.mask.scale || 0),
         rotation: Math.atan2(dy, dx),
         visible: 1
       }

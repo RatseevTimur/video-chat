@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BsCameraVideo, BsCameraVideoOff, BsCheck, BsCopy, BsMicFill, BsMicMuteFill } from 'react-icons/bs'
+import {
+  BsCameraVideo,
+  BsCameraVideoOff,
+  BsChatDots,
+  BsCheck,
+  BsCopy,
+  BsMicFill,
+  BsMicMuteFill
+} from 'react-icons/bs'
+import { MdFlipCameraIos } from 'react-icons/md'
 import { FiPhoneOff } from 'react-icons/fi'
 import { useNavigate, useParams } from 'react-router-dom'
 
@@ -7,6 +16,7 @@ import MaskEngine from '../utils/MaskEngine'
 import PeerConnection from '../utils/PeerConnection'
 import { getStoredId, getStoredName } from '../utils/session'
 import socket from '../utils/socket'
+import InCallChat from './InCallChat'
 import MaskPicker from './MaskPicker'
 import PeerTile from './PeerTile'
 
@@ -39,6 +49,11 @@ const Room = () => {
   const [videoOn, setVideoOn] = useState(true)
   const [audioOn, setAudioOn] = useState(true)
   const [mediaReady, setMediaReady] = useState(false)
+  const [facing, setFacing] = useState('user')
+  const [canFlip, setCanFlip] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [messages, setMessages] = useState([])
+  const [unread, setUnread] = useState(0)
   const [remoteStreams, setRemoteStreams] = useState({})
 
   const localVideo = useRef(null)
@@ -52,12 +67,27 @@ const Room = () => {
   const mediaReadyRef = useRef(false)
   const roomInfoRef = useRef(null)
   const creatingRef = useRef(new Set())
+  const messagesRef = useRef([])
+  const chatOpenRef = useRef(false)
+  const facingRef = useRef('user')
+  const maskIdRef = useRef('none')
 
   const displayName = useCallback((id) => roomInfoRef.current?.names?.[id] || id, [])
 
   const attachLocalPreview = useCallback((stream) => {
-    if (localVideo.current && stream) {
-      localVideo.current.srcObject = stream
+    if (localVideo.current && stream) localVideo.current.srcObject = stream
+  }, [])
+
+  const setChat = (next) => {
+    messagesRef.current = next
+    setMessages(next)
+  }
+
+  const addMessage = useCallback((message) => {
+    if (!message?.id || messagesRef.current.some((item) => item.id === message.id)) return
+    setChat([...messagesRef.current, message])
+    if (!chatOpenRef.current && message.from !== localIdRef.current) {
+      setUnread((n) => n + 1)
     }
   }, [])
 
@@ -87,6 +117,30 @@ const Room = () => {
     queueRef.current.set(peerId, [])
     queued.forEach((data) => pc.applySignal(data))
   }, [])
+
+  const pushVideoTrack = useCallback((track) => {
+    if (!track) return
+    peersRef.current.forEach((pc) => {
+      if (pc && !pc.pending) pc.replaceVideoTrack?.(track)
+    })
+  }, [])
+
+  const bindComposer = useCallback(async (raw) => {
+    if (!engineRef.current) engineRef.current = new MaskEngine()
+    const engine = engineRef.current
+    await engine.init()
+    await engine.setMask(maskIdRef.current)
+    if (localCanvas.current) engine.attach({ stream: raw, canvas: localCanvas.current })
+    const canvasStream = engine.getStream(24)
+    const mixed = new MediaStream([
+      ...(canvasStream?.getVideoTracks() || raw.getVideoTracks()),
+      ...raw.getAudioTracks()
+    ])
+    outboundRef.current = mixed
+    attachLocalPreview(mixed)
+    pushVideoTrack(mixed.getVideoTracks()[0])
+    return mixed
+  }, [attachLocalPreview, pushVideoTrack])
 
   const ensurePeer = useCallback(async (remoteId, { restart = false } = {}) => {
     const me = localIdRef.current
@@ -163,9 +217,10 @@ const Room = () => {
 
     socket
       .on('init', onInit)
-      .on('roomJoined', ({ roomInfo: info }) => {
+      .on('roomJoined', ({ roomInfo: info, chat }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
+        if (Array.isArray(chat)) setChat(chat)
         setError('')
         meshWith(info?.participants)
       })
@@ -202,6 +257,7 @@ const Room = () => {
         const existing = peersRef.current.get(userId)
         ensurePeer(userId, { restart: Boolean(existing && !existing.pending && shouldRestart(existing)) })
       })
+      .on('chatMessage', ({ message }) => addMessage(message))
       .on('call', async (data) => {
         const from = data?.from
         if (!from || from === localIdRef.current) return
@@ -221,12 +277,12 @@ const Room = () => {
     return () => {
       closeAllPeers()
       socket.emit('leaveRoom')
-      ;['init', 'roomJoined', 'roomError', 'userJoined', 'userLeft', 'hostChanged', 'peerMediaReady', 'call']
+      ;['init', 'roomJoined', 'roomError', 'userJoined', 'userLeft', 'hostChanged', 'peerMediaReady', 'chatMessage', 'call']
         .forEach((ev) => socket.off(ev))
       rawStreamRef.current?.getTracks().forEach((track) => track.stop())
       engineRef.current?.dispose()
     }
-  }, [roomId, navigate, meshWith, ensurePeer, closePeer, closeAllPeers, flushQueue])
+  }, [roomId, navigate, meshWith, ensurePeer, closePeer, closeAllPeers, flushQueue, addMessage])
 
   useEffect(() => {
     if (!roomInfo || roomInfo.type === 'text') return undefined
@@ -237,7 +293,7 @@ const Room = () => {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
           video: {
-            facingMode: 'user',
+            facingMode: facingRef.current,
             width: { ideal: 640, max: 1280 },
             height: { ideal: 480, max: 720 },
             frameRate: { ideal: 24, max: 30 }
@@ -248,12 +304,17 @@ const Room = () => {
           return
         }
         rawStreamRef.current = stream
-        outboundRef.current = stream
-        attachLocalPreview(stream)
+        await bindComposer(stream)
         mediaReadyRef.current = true
         setMediaReady(true)
         socket.emit('mediaReady')
         meshWith(roomInfoRef.current?.participants)
+
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          const cams = devices.filter((item) => item.kind === 'videoinput').length
+          setCanFlip(cams > 1 || ('ontouchstart' in window))
+        } catch { /* ignore */ }
       } catch (err) {
         console.error(err)
         setError('Нужен доступ к камере и микрофону / Allow camera and microphone')
@@ -262,46 +323,44 @@ const Room = () => {
 
     startPreview()
     return () => { cancelled = true }
-  }, [roomInfo?.type, roomId, meshWith, attachLocalPreview])
+  }, [roomInfo?.type, roomId, meshWith, bindComposer])
 
   useEffect(() => {
     if (mediaReady && roomInfo?.participants) meshWith(roomInfo.participants)
   }, [mediaReady, roomInfo?.participants, meshWith])
 
-  const pushVideoTrack = (track) => {
-    peersRef.current.forEach((pc) => {
-      if (pc && !pc.pending) pc.replaceVideoTrack?.(track)
-    })
+  const changeMask = async (id) => {
+    maskIdRef.current = id
+    setMaskId(id)
+    await engineRef.current?.setMask(id)
   }
 
-  const changeMask = async (id) => {
-    setMaskId(id)
-    const raw = rawStreamRef.current
-    if (!raw) return
-
-    if (id === 'none') {
-      engineRef.current?.stop({ keepCanvas: true })
-      outboundRef.current = raw
-      attachLocalPreview(raw)
-      pushVideoTrack(raw.getVideoTracks()[0])
-      return
+  const flipCamera = async () => {
+    const next = facingRef.current === 'user' ? 'environment' : 'user'
+    try {
+      const fresh = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: next },
+          width: { ideal: 640, max: 1280 },
+          height: { ideal: 480, max: 720 }
+        }
+      })
+      const newVideo = fresh.getVideoTracks()[0]
+      const raw = rawStreamRef.current
+      raw?.getVideoTracks().forEach((track) => {
+        raw.removeTrack(track)
+        track.stop()
+      })
+      if (raw) raw.addTrack(newVideo)
+      else rawStreamRef.current = new MediaStream([newVideo, ...(outboundRef.current?.getAudioTracks() || [])])
+      facingRef.current = next
+      setFacing(next)
+      await bindComposer(rawStreamRef.current)
+      rawStreamRef.current.getVideoTracks().forEach((track) => { track.enabled = videoOn })
+    } catch (err) {
+      console.error(err)
+      setError('Не удалось переключить камеру / Cannot switch camera')
     }
-
-    if (!engineRef.current) engineRef.current = new MaskEngine()
-    const engine = engineRef.current
-    await engine.init()
-    await engine.setMask(id)
-    if (localCanvas.current) {
-      engine.attach({ stream: raw, canvas: localCanvas.current })
-    }
-    const canvasStream = engine.getStream(24)
-    const mixed = new MediaStream([
-      ...(canvasStream?.getVideoTracks() || raw.getVideoTracks()),
-      ...raw.getAudioTracks()
-    ])
-    outboundRef.current = mixed
-    attachLocalPreview(mixed)
-    pushVideoTrack(mixed.getVideoTracks()[0])
   }
 
   const toggleVideo = () => {
@@ -324,6 +383,25 @@ const Room = () => {
     navigate('/')
   }
 
+  const sendMessage = (text) => {
+    const message = {
+      id: `${Date.now()}-${localIdRef.current}`,
+      from: localIdRef.current,
+      fromName: getStoredName() || localIdRef.current,
+      text,
+      ts: Date.now()
+    }
+    addMessage(message)
+    socket.emit('chatMessage', { text, id: message.id })
+  }
+
+  const toggleChat = () => {
+    const next = !chatOpen
+    chatOpenRef.current = next
+    setChatOpen(next)
+    if (next) setUnread(0)
+  }
+
   const copyLink = async () => {
     const link = `${window.location.origin}/room/${roomId}`
     try { await navigator.clipboard.writeText(link) } catch { /* ignore */ }
@@ -331,13 +409,11 @@ const Room = () => {
     setTimeout(() => setCopied(false), 1600)
   }
 
-  const peerIds = Object.keys(remoteStreams)
   const others = (roomInfo?.participants || []).filter((id) => id !== localId)
-  const tiles = others.length ? others : []
-  const tileCount = 1 + Math.max(tiles.length, peerIds.length ? peerIds.length : 0)
+  const tileCount = 1 + others.length
 
   return (
-    <div className="meet-room">
+    <div className={`meet-room ${chatOpen ? 'has-chat' : ''}`}>
       <header className="meet-header">
         <div>
           <h1>{roomInfo?.participantCount || 1} в встрече</h1>
@@ -357,23 +433,42 @@ const Room = () => {
         </div>
       )}
 
-      <section className={`meet-grid ${gridClass(Math.max(1, tileCount))}`}>
-        <div className={`meet-tile meet-tile-local ${videoOn ? '' : 'is-off'}`}>
-          <video ref={localVideo} className="mirror" autoPlay playsInline muted />
-          <canvas ref={localCanvas} className="mask-canvas-hidden" />
-          {!videoOn && <div className="meet-tile-empty">{(getStoredName() || 'Вы').slice(0, 1)}</div>}
-          <span className="video-label">Вы</span>
-        </div>
+      <div className="meet-stage">
+        <section className={`meet-grid ${gridClass(Math.max(1, tileCount))}`}>
+          <div className={`meet-tile meet-tile-local ${videoOn ? '' : 'is-off'}`}>
+            <video
+              ref={localVideo}
+              className={facing === 'user' ? 'mirror' : ''}
+              autoPlay
+              playsInline
+              muted
+            />
+            <canvas ref={localCanvas} className="mask-canvas-hidden" />
+            {!videoOn && <div className="meet-tile-empty">{(getStoredName() || 'Вы').slice(0, 1)}</div>}
+            <span className="video-label">Вы</span>
+          </div>
 
-        {tiles.map((id) => (
-          <PeerTile
-            key={id}
-            stream={remoteStreams[id]}
-            name={displayName(id)}
-            videoOff={!remoteStreams[id]}
+          {others.map((id) => (
+            <PeerTile
+              key={id}
+              stream={remoteStreams[id]}
+              name={displayName(id)}
+              videoOff={!remoteStreams[id]}
+            />
+          ))}
+        </section>
+
+        {chatOpen && (
+          <InCallChat
+            messages={messages}
+            onSend={sendMessage}
+            localId={localId}
+            title="Чат"
+            hint="Только пока комната открыта"
+            onClose={toggleChat}
           />
-        ))}
-      </section>
+        )}
+      </div>
 
       <footer className="meet-controls">
         <div className="control-buttons">
@@ -393,7 +488,21 @@ const Room = () => {
           >
             {videoOn ? <BsCameraVideo /> : <BsCameraVideoOff />}
           </button>
+          {canFlip && (
+            <button type="button" className="ctrl" onClick={flipCamera} title="Сменить камеру">
+              <MdFlipCameraIos />
+            </button>
+          )}
           <MaskPicker value={maskId} onChange={changeMask} disabled={!mediaReady} />
+          <button
+            type="button"
+            className={`ctrl ${chatOpen ? 'ctrl-on' : ''}`}
+            onClick={toggleChat}
+            title="Чат"
+          >
+            <BsChatDots />
+            {unread > 0 && <span className="ctrl-badge">{unread}</span>}
+          </button>
           <button type="button" className="ctrl ctrl-leave" onClick={leaveRoom} title="Выйти">
             <FiPhoneOff />
           </button>
