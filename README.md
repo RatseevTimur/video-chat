@@ -1,4 +1,8 @@
-# Family Chat
+<p align="center">
+  <a href="https://github.com/whiteSHADOW1234/TypingSVG">
+    <img src="https://typingsvg.vercel.app/api/svg?cursorStyle=underline&lines=%5B%7B%22text%22%3A%22Family+Chat%22%2C%22color%22%3A%22%2318e26f%22%2C%22typingSpeed%22%3A0.1%2C%22deleteSpeed%22%3A0.05%7D%2C%7B%22text%22%3A%22to+stay+in+touch+with+loved+ones+without+limits%22%2C%22color%22%3A%22%2316d813%22%2C%22fontSize%22%3A12%2C%22typingSpeed%22%3A0.05%2C%22deleteSpeed%22%3A0.03333333333333333%7D%5D" alt="Family Chat" />
+  </a>
+</p>
 
 [![RU](https://img.shields.io/badge/docs-Русский-1a73e8)](./docs/index.html#ru)
 [![EN](https://img.shields.io/badge/docs-English-1e8e3e)](./docs/index.html#en)
