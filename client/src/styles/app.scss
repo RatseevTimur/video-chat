@@ -133,6 +133,65 @@
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 1rem;
   padding: 1rem;
+  min-height: 0;
+}
+
+.meet-body-full {
+  align-items: stretch;
+}
+
+.meet-grid {
+  display: grid;
+  gap: 0.55rem;
+  min-height: 52vh;
+  height: 100%;
+  background: #000;
+  border-radius: 18px;
+  padding: 0.55rem;
+  overflow: hidden;
+}
+
+.meet-grid.grid-1 { grid-template-columns: 1fr; }
+.meet-grid.grid-2 { grid-template-columns: 1fr 1fr; }
+.meet-grid.grid-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.meet-grid.grid-6 { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
+.meet-grid.grid-9 { grid-template-columns: repeat(3, 1fr); }
+.meet-grid.grid-10 { grid-template-columns: repeat(4, 1fr); }
+
+.meet-tile {
+  position: relative;
+  min-height: 0;
+  background: #1a1d24;
+  border-radius: 14px;
+  overflow: hidden;
+
+  video, .local-canvas, .meet-tile-empty {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* crop like Google Meet — phone + desktop */
+    display: block;
+  }
+
+  .local-canvas {
+    transform: scaleX(-1);
+    background: #000;
+  }
+}
+
+.meet-tile-empty {
+  display: grid;
+  place-items: center;
+  font-size: 2.4rem;
+  font-weight: 700;
+  opacity: 0.45;
+  background: linear-gradient(145deg, #2a3140, #151820);
+}
+
+.meet-tile-wait .video-label {
+  left: 50%;
+  bottom: 40%;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .stage {
@@ -182,6 +241,33 @@
   height: auto;
   transform: scaleX(-1);
   background: #000;
+}
+
+.person.live {
+  border-color: #1e8e3e;
+  color: #81c995;
+}
+
+.admit-bar {
+  margin: 0 1rem 0.8rem;
+  padding: 0.85rem 1rem;
+  border-radius: 14px;
+  background: rgba(26, 115, 232, 0.18);
+  border: 1px solid rgba(26, 115, 232, 0.35);
+  display: grid;
+  gap: 0.55rem;
+}
+
+.admit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+
+  span {
+    flex: 1 1 120px;
+    font-weight: 600;
+  }
 }
 
 .mask-demo-stage {
@@ -476,5 +562,18 @@
   .meet-header { flex-wrap: wrap; }
   .meet-header h1 { flex: 1 1 180px; }
   .local-pane { width: 140px; }
-  .in-call-chat { min-height: 280px; }
+  .in-call-chat { min-height: 220px; max-height: 28vh; }
+  .meet-grid {
+    min-height: 48vh;
+    max-height: 62vh;
+  }
+  .meet-grid.grid-6,
+  .meet-grid.grid-9,
+  .meet-grid.grid-10 {
+    grid-template-columns: 1fr 1fr;
+  }
+  .meet-grid.grid-2 {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
+  }
 }

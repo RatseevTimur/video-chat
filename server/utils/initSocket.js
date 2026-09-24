@@ -10,7 +10,7 @@ const ROOM_RE = /^[A-Za-z0-9_-]{6,16}$/
 const MAX_NAME = 24
 const MAX_MSG = 2000
 const MAX_CHAT = 60
-const MAX_PARTICIPANTS = 8
+const MAX_PARTICIPANTS = 10
 const CHAT_TTL_MS = 10 * 60 * 1000
 const ROOM_TTL_MS = 6 * 60 * 60 * 1000
 
@@ -39,6 +39,10 @@ function sanitizeText(text) {
 function getRoomInfo(roomId) {
   const room = rooms[roomId]
   if (!room) return null
+  const waiting = Object.entries(room.waiting || {}).map(([id, item]) => ({
+    id,
+    name: item.name || id
+  }))
   return {
     roomId,
     type: room.type,
@@ -46,8 +50,9 @@ function getRoomInfo(roomId) {
     names: room.names,
     host: room.host,
     participantCount: room.participants.length,
-    callActive: Boolean(room.call.active),
-    inCall: room.call.inCall
+    waiting,
+    callActive: Boolean(room.call?.active),
+    inCall: room.call?.inCall || []
   }
 }
 
@@ -62,6 +67,26 @@ function pushMessage(room, message) {
   room.chatExpiresAt = Date.now() + CHAT_TTL_MS
 }
 
+function emptyRoom(type, hostId) {
+  return {
+    type,
+    participants: [],
+    waiting: Object.create(null),
+    names: Object.create(null),
+    host: hostId,
+    createdAt: Date.now(),
+    call: { active: false, callerId: null, inCall: [] },
+    chat: [],
+    chatExpiresAt: 0
+  }
+}
+
+function notifyHostWaiting(roomId) {
+  const room = rooms[roomId]
+  if (!room?.host) return
+  emit(room.host, 'waitingUpdated', { roomInfo: getRoomInfo(roomId) })
+}
+
 function leaveRoom(socketState) {
   const { id, currentRoom, socket } = socketState
   if (!currentRoom || !rooms[currentRoom]) {
@@ -70,14 +95,27 @@ function leaveRoom(socketState) {
   }
 
   const room = rooms[currentRoom]
+  const wasWaiting = Boolean(room.waiting?.[id])
+  if (room.waiting) delete room.waiting[id]
+
+  const wasParticipant = room.participants.includes(id)
   room.participants = room.participants.filter((userId) => userId !== id)
   room.call.inCall = room.call.inCall.filter((userId) => userId !== id)
   delete room.names[id]
 
-  emitToRoom(currentRoom, 'userLeft', {
-    userId: id,
-    roomInfo: getRoomInfo(currentRoom)
-  }, socket)
+  if (wasWaiting && !wasParticipant) {
+    notifyHostWaiting(currentRoom)
+    socket.leave(currentRoom)
+    socketState.currentRoom = null
+    return
+  }
+
+  if (wasParticipant) {
+    emitToRoom(currentRoom, 'userLeft', {
+      userId: id,
+      roomInfo: getRoomInfo(currentRoom)
+    }, socket)
+  }
 
   if (room.call.active && room.call.inCall.length === 0) {
     room.call = { active: false, callerId: null, inCall: [] }
@@ -90,12 +128,15 @@ function leaveRoom(socketState) {
   if (room.participants.length === 0) {
     room.emptyAt = Date.now()
     if (room.type === 'video') clearChat(room)
+    // Clear leftover waiting knocks if room emptied
+    room.waiting = Object.create(null)
   } else if (room.host === id) {
     room.host = room.participants[0]
     emitToRoom(currentRoom, 'hostChanged', {
       newHost: room.host,
       roomInfo: getRoomInfo(currentRoom)
     })
+    notifyHostWaiting(currentRoom)
   }
 
   socket.leave(currentRoom)
@@ -156,16 +197,10 @@ export default function initSocket(socket) {
       ensureId(state, socket)
       const type = data.type === 'text' ? 'text' : 'video'
       const roomId = nanoid(10)
-      rooms[roomId] = {
-        type,
-        participants: [state.id],
-        names: { [state.id]: sanitizeName(data.name) || state.id },
-        host: state.id,
-        createdAt: Date.now(),
-        call: { active: false, callerId: null, inCall: [] },
-        chat: [],
-        chatExpiresAt: 0
-      }
+      const room = emptyRoom(type, state.id)
+      room.participants = [state.id]
+      room.names[state.id] = sanitizeName(data.name) || state.id
+      rooms[roomId] = room
       state.currentRoom = roomId
       socket.join(roomId)
       socket.emit('roomCreated', { roomId, roomInfo: getRoomInfo(roomId) })
@@ -177,47 +212,164 @@ export default function initSocket(socket) {
         socket.emit('roomError', { message: 'Комната не найдена / Room not found' })
         return
       }
-      if (!rooms[roomId]) {
-        rooms[roomId] = {
-          type: 'video',
-          participants: [],
-          names: {},
-          host: state.id,
-          createdAt: Date.now(),
-          call: { active: false, callerId: null, inCall: [] },
-          chat: [],
-          chatExpiresAt: 0
-        }
-      }
 
-      const room = rooms[roomId]
-      if (room.participants.length >= MAX_PARTICIPANTS && !room.participants.includes(state.id)) {
-        socket.emit('roomError', { message: 'Комната заполнена / Room is full' })
-        return
+      if (!rooms[roomId]) {
+        rooms[roomId] = emptyRoom('video', state.id)
       }
+      const room = rooms[roomId]
+      if (!room.waiting) room.waiting = Object.create(null)
+
+      const name = sanitizeName(data.name) || state.id
 
       if (state.currentRoom && state.currentRoom !== roomId) {
         leaveRoom(state)
       }
 
-      if (!room.participants.includes(state.id)) {
-        room.participants.push(state.id)
+      // Already inside → rejoin
+      if (room.participants.includes(state.id)) {
+        room.names[state.id] = name
+        room.emptyAt = 0
+        state.currentRoom = roomId
+        socket.join(roomId)
+        socket.emit('roomJoined', {
+          roomId,
+          status: 'joined',
+          roomInfo: getRoomInfo(roomId),
+          chat: room.chat || []
+        })
+        return
       }
-      room.names[state.id] = sanitizeName(data.name) || state.id
-      room.emptyAt = 0
+
+      // Empty room → first person is host (no knock)
+      if (room.participants.length === 0) {
+        room.host = state.id
+        room.participants = [state.id]
+        room.names[state.id] = name
+        room.waiting = Object.create(null)
+        room.emptyAt = 0
+        state.currentRoom = roomId
+        socket.join(roomId)
+        socket.emit('roomJoined', {
+          roomId,
+          status: 'joined',
+          roomInfo: getRoomInfo(roomId),
+          chat: room.chat || []
+        })
+        return
+      }
+
+      // Text rooms: auto-join (no waiting room)
+      if (room.type === 'text') {
+        if (room.participants.length >= MAX_PARTICIPANTS) {
+          socket.emit('roomError', { message: 'Комната заполнена / Room is full' })
+          return
+        }
+        room.participants.push(state.id)
+        room.names[state.id] = name
+        room.emptyAt = 0
+        state.currentRoom = roomId
+        socket.join(roomId)
+        emitToRoom(roomId, 'userJoined', {
+          userId: state.id,
+          roomInfo: getRoomInfo(roomId)
+        }, socket)
+        socket.emit('roomJoined', {
+          roomId,
+          status: 'joined',
+          roomInfo: getRoomInfo(roomId),
+          chat: room.chat || []
+        })
+        return
+      }
+
+      // Video: knock / waiting room (can retry after deny)
+      if (room.participants.length >= MAX_PARTICIPANTS) {
+        socket.emit('roomError', { message: 'Комната заполнена / Room is full' })
+        return
+      }
+
+      room.waiting[state.id] = { name, at: Date.now() }
       state.currentRoom = roomId
-      socket.join(roomId)
-
-      emitToRoom(roomId, 'userJoined', {
-        userId: state.id,
-        roomInfo: getRoomInfo(roomId)
-      }, socket)
-
-      socket.emit('roomJoined', {
+      socket.emit('joinPending', {
         roomId,
-        roomInfo: getRoomInfo(roomId),
-        chat: room.type === 'text' || room.call.active ? room.chat : []
+        hostName: room.names[room.host] || room.host,
+        roomInfo: getRoomInfo(roomId)
       })
+      emit(room.host, 'joinRequest', {
+        userId: state.id,
+        name,
+        roomInfo: getRoomInfo(roomId)
+      })
+    })
+    .on('requestJoin', (data = {}) => {
+      // Second (nth) attempt after deny — same as knocking again
+      ensureId(state, socket)
+      const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : state.currentRoom
+      const room = rooms[roomId]
+      if (!room || room.type !== 'video') return
+      if (room.participants.includes(state.id)) return
+      if (room.participants.length >= MAX_PARTICIPANTS) {
+        socket.emit('roomError', { message: 'Комната заполнена / Room is full' })
+        return
+      }
+      const name = sanitizeName(data.name) || room.waiting?.[state.id]?.name || state.id
+      if (!room.waiting) room.waiting = Object.create(null)
+      room.waiting[state.id] = { name, at: Date.now() }
+      state.currentRoom = roomId
+      socket.emit('joinPending', {
+        roomId,
+        hostName: room.names[room.host] || room.host,
+        roomInfo: getRoomInfo(roomId)
+      })
+      emit(room.host, 'joinRequest', {
+        userId: state.id,
+        name,
+        roomInfo: getRoomInfo(roomId)
+      })
+    })
+    .on('admitJoin', (data = {}) => {
+      const room = rooms[state.currentRoom]
+      if (!room || state.id !== room.host) return
+      const userId = typeof data.userId === 'string' ? data.userId : ''
+      const waiting = room.waiting?.[userId]
+      if (!waiting) return
+      if (room.participants.length >= MAX_PARTICIPANTS) {
+        socket.emit('roomError', { message: 'Комната заполнена / Room is full' })
+        return
+      }
+
+      delete room.waiting[userId]
+      room.participants.push(userId)
+      room.names[userId] = waiting.name || userId
+      room.emptyAt = 0
+
+      const guest = users[userId]
+      guest?.join(state.currentRoom)
+
+      const info = getRoomInfo(state.currentRoom)
+      guest?.emit('roomJoined', {
+        roomId: state.currentRoom,
+        status: 'joined',
+        roomInfo: info,
+        chat: room.chat || []
+      })
+      emitToRoom(state.currentRoom, 'userJoined', {
+        userId,
+        roomInfo: info
+      })
+      socket.emit('waitingUpdated', { roomInfo: info })
+    })
+    .on('denyJoin', (data = {}) => {
+      const room = rooms[state.currentRoom]
+      if (!room || state.id !== room.host) return
+      const userId = typeof data.userId === 'string' ? data.userId : ''
+      if (!room.waiting?.[userId]) return
+      delete room.waiting[userId]
+      emit(userId, 'joinDenied', {
+        roomId: state.currentRoom,
+        hostName: room.names[room.host] || room.host
+      })
+      socket.emit('waitingUpdated', { roomInfo: getRoomInfo(state.currentRoom) })
     })
     .on('leaveRoom', () => leaveRoom(state))
     .on('startCall', (data = {}) => {
@@ -282,7 +434,7 @@ export default function initSocket(socket) {
     .on('chatMessage', (data = {}) => {
       const room = rooms[state.currentRoom]
       if (!room || !state.id) return
-      if (room.type === 'video' && !room.call.active) return
+      // Meet-style: chat works whenever people are in the room (no "call" gate)
       if (!rateLimit(limits, 'chat', 40, 60_000)) return
 
       const text = sanitizeText(data.text)
@@ -319,16 +471,7 @@ export default function initSocket(socket) {
       if (!chat) return
       const roomId = chat.roomId
       if (!rooms[roomId]) {
-        rooms[roomId] = {
-          type: 'video',
-          participants: [],
-          names: {},
-          host: state.id,
-          createdAt: Date.now(),
-          call: { active: false, callerId: null, inCall: [] },
-          chat: [],
-          chatExpiresAt: 0
-        }
+        rooms[roomId] = emptyRoom('video', state.id)
       }
       notifyMembers(chatId, state.email, 'familyCall', {
         from: state.id,
