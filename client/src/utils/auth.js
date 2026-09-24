@@ -33,7 +33,8 @@ export async function api(path, options = {}) {
   })
   const data = await response.json().catch(() => ({}))
   if (!response.ok) {
-    throw new Error(data.error || 'Ошибка / Error')
+    const msg = data.detail ? `${data.error}: ${data.detail}` : (data.error || 'Ошибка / Error')
+    throw new Error(msg)
   }
   return data
 }

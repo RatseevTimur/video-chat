@@ -79,11 +79,41 @@ fi
 
 PORT="${PORT:-4000}"
 INVITE="${INVITE:-$(openssl rand -hex 6)}"
+
+# Load optional secrets (never committed)
+if [ -f server/.env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . server/.env
+  set +a
+fi
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . .env
+  set +a
+fi
+
 export PORT INVITE
+[ -n "${MAIL_URL:-}" ] && export MAIL_URL
+[ -n "${MAIL_STORE:-}" ] && export MAIL_STORE
+[ -n "${SMTP_FROM:-}" ] && export SMTP_FROM
 
 if [ "${TUNNEL:-1}" = "1" ]; then ensure_cloudflared; fi
 
 echo ""
+if [ -n "${MAIL_URL:-}" ]; then
+  echo "==> MAIL_URL set → codes go to email (SMTP)"
+  if [ "${MAIL_STORE:-1}" = "0" ]; then
+    echo "    Mode A+: auth by email, chat in RAM"
+  else
+    echo "    Mode B: auth + mail store for messages"
+  fi
+else
+  echo "==> MAIL_URL empty → codes print HERE in this terminal (not inbox)"
+  echo "    To send real email, put in server/.env:"
+  echo "    MAIL_URL='smtps://login%40yandex.ru:APP_PASSWORD@smtp.yandex.ru:465'"
+fi
 echo "==> Starting server (invite=$INVITE)"
 yarn --cwd server start &
 SERVER_PID=$!

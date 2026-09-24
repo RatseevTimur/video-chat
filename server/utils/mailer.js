@@ -42,26 +42,50 @@ export function mailStoreEnabled() {
   return process.env.MAIL_STORE !== '0'
 }
 
+export function mailStatus() {
+  const cfg = smtpConfig()
+  if (!cfg) {
+    return { ok: false, mode: 'console', detail: 'MAIL_URL not set — codes print in server terminal only' }
+  }
+  return {
+    ok: true,
+    mode: mailStoreEnabled() ? 'smtp+store' : 'smtp-auth',
+    host: cfg.host,
+    user: cfg.user,
+    from: cfg.from
+  }
+}
+
 export async function sendMail({ to, subject, text }) {
   const cfg = smtpConfig()
   if (!cfg) {
+    console.log(`[mail:console] MAIL_URL is empty — not sending to inbox`)
     console.log(`[mail:console] → ${to}\n${subject}\n${text}\n`)
     return { delivered: false, console: true }
   }
 
-  const nodemailer = await import('nodemailer')
-  const transporter = nodemailer.createTransport({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.secure,
-    auth: { user: cfg.user, pass: cfg.pass }
-  })
+  try {
+    const nodemailer = await import('nodemailer')
+    const transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      auth: { user: cfg.user, pass: cfg.pass }
+    })
 
-  await transporter.sendMail({
-    from: cfg.from,
-    to,
-    subject,
-    text
-  })
-  return { delivered: true }
+    const info = await transporter.sendMail({
+      from: cfg.from,
+      to,
+      subject,
+      text
+    })
+    console.log(`[mail:smtp] sent to ${to} via ${cfg.host} id=${info.messageId || '?'}`)
+    return { delivered: true }
+  } catch (error) {
+    console.error(`[mail:smtp] FAILED to ${to} via ${cfg.host}:`, error.message)
+    const err = new Error('mail_failed')
+    err.cause = error
+    err.detail = error.message
+    throw err
+  }
 }

@@ -13,7 +13,7 @@ import {
   startAuth,
   verifyAuth
 } from './messenger.js'
-import { mailConfigured, mailStoreEnabled } from './mailer.js'
+import { mailConfigured, mailStoreEnabled, mailStatus } from './mailer.js'
 
 function auth(req) {
   const header = req.headers.authorization || ''
@@ -35,6 +35,7 @@ function fail(res, error) {
     slow_down: [429, 'Подождите 30 секунд / Wait 30 seconds'],
     expired: [400, 'Код устарел — запросите новый / Code expired'],
     bad_code: [400, 'Неверный код / Wrong code'],
+    mail_failed: [502, 'Почта не отправилась — проверьте MAIL_URL / SMTP failed, check MAIL_URL'],
     need_verify: [400, 'Нужно подтвердить почту кодом / Verify email with code'],
     need_members: [400, 'Добавьте хотя бы одного родственника / Add at least one relative'],
     too_many: [400, 'Слишком много участников / Too many members'],
@@ -43,14 +44,18 @@ function fail(res, error) {
     auth: [401, 'Нужен вход / Sign in required']
   }
   const [status, message] = map[error.message] || [error.status || 500, 'Ошибка / Error']
-  res.status(status).json({ error: message })
+  const payload = { error: message }
+  if (error.message === 'mail_failed' && error.detail) payload.detail = error.detail
+  res.status(status).json(payload)
 }
 
 export function attachApi(app) {
   app.get('/api/bootstrap', (_req, res) => {
+    const status = mailStatus()
     res.json({
       mail: mailConfigured(),
       mailStore: mailStoreEnabled(),
+      mailStatus: status,
       mode: mailStoreEnabled() ? 'mail-db' : (mailConfigured() ? 'mail-auth' : 'ram-auth'),
       publicUrl: getPublicUrl() || null,
       inviteHint: true,
@@ -59,7 +64,7 @@ export function attachApi(app) {
         ? 'Mode B: email OTP + ciphertext in mail.'
         : mailConfigured()
           ? 'Mode A+: email OTP only; messages in RAM.'
-          : 'Mode A: console OTP; messages in RAM.'
+          : 'Mode A: console OTP; messages in RAM. Set MAIL_URL to send real email.'
     })
   })
 
