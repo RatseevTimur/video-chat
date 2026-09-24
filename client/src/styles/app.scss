@@ -1,5 +1,6 @@
 .app {
-  min-height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 .btn {
@@ -108,7 +109,9 @@
 }
 
 .meet-room, .mask-demo {
-  min-height: 100vh;
+  height: 100%;
+  max-height: 100%;
+  overflow: hidden;
   background: #0f1115;
   color: white;
   display: flex;
@@ -116,23 +119,24 @@
 }
 
 .meet-header {
+  flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 1rem;
-  padding: 1rem 1.2rem;
+  gap: 0.8rem;
+  padding: 0.7rem 1rem;
   background: rgba(255,255,255,0.04);
 
-  h1 { margin: 0; font-size: 1.15rem; }
-  p { margin: 0.2rem 0 0; opacity: 0.65; font-size: 0.9rem; }
+  h1 { margin: 0; font-size: 1rem; }
+  p { margin: 0.15rem 0 0; opacity: 0.65; font-size: 0.8rem; }
 }
 
 .meet-body, .text-room {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 1rem;
-  padding: 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.6rem;
+  padding: 0.5rem 0.7rem;
   min-height: 0;
 }
 
@@ -141,13 +145,13 @@
 }
 
 .meet-grid {
+  flex: 1 1 auto;
   display: grid;
-  gap: 0.55rem;
-  min-height: 52vh;
-  height: 100%;
+  gap: 0.45rem;
+  min-height: 0;
   background: #000;
-  border-radius: 18px;
-  padding: 0.55rem;
+  border-radius: 14px;
+  padding: 0.45rem;
   overflow: hidden;
 }
 
@@ -165,17 +169,32 @@
   border-radius: 14px;
   overflow: hidden;
 
+  &.is-off video { visibility: hidden; }
+
   video, .local-canvas, .meet-tile-empty {
     width: 100%;
     height: 100%;
-    object-fit: cover; /* crop like Google Meet — phone + desktop */
+    object-fit: cover;
     display: block;
   }
 
-  .local-canvas {
-    transform: scaleX(-1);
-    background: #000;
-  }
+  video.mirror { transform: scaleX(-1); }
+}
+
+.mask-canvas-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
 }
 
 .meet-tile-empty {
@@ -288,36 +307,46 @@
 }
 
 .meet-controls {
-  padding: 0.8rem 1rem 1.2rem;
+  flex: 0 0 auto;
+  padding: 0.55rem 0.8rem 0.9rem;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.8rem;
+  gap: 0.5rem;
 }
 
 .control-buttons {
   display: flex;
+  align-items: center;
   gap: 0.7rem;
   flex-wrap: wrap;
   justify-content: center;
 }
 
-.mask-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  justify-content: center;
+.ctrl {
+  width: 52px;
+  height: 52px;
+  border: 0;
+  border-radius: 50%;
+  background: #3c4043;
+  color: white;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+}
 
-  button {
-    background: #1f2430;
-    color: white;
-    border: 1px solid transparent;
-    border-radius: 999px;
-    padding: 0.45rem 0.8rem;
-    cursor: pointer;
-  }
+.ctrl-off { background: #d93025; }
+.ctrl-leave { background: #d93025; width: 64px; border-radius: 28px; }
 
-  button.active { border-color: #8ab4f8; background: #2b3648; }
+.mask-select select {
+  height: 52px;
+  border: 0;
+  border-radius: 26px;
+  padding: 0 1rem;
+  background: #3c4043;
+  color: white;
+  max-width: 180px;
 }
 
 .people-list {
@@ -562,18 +591,10 @@
   .meet-header { flex-wrap: wrap; }
   .meet-header h1 { flex: 1 1 180px; }
   .local-pane { width: 140px; }
-  .in-call-chat { min-height: 220px; max-height: 28vh; }
-  .meet-grid {
-    min-height: 48vh;
-    max-height: 62vh;
-  }
+  .in-call-chat { min-height: 0; max-height: none; }
   .meet-grid.grid-6,
   .meet-grid.grid-9,
   .meet-grid.grid-10 {
     grid-template-columns: 1fr 1fr;
-  }
-  .meet-grid.grid-2 {
-    grid-template-columns: 1fr;
-    grid-template-rows: 1fr 1fr;
   }
 }

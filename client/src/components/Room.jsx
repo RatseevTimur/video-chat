@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BsArrowLeft, BsCameraVideo, BsCheck, BsCopy, BsPhone } from 'react-icons/bs'
+import { BsCameraVideo, BsCameraVideoOff, BsCheck, BsCopy, BsMicFill, BsMicMuteFill } from 'react-icons/bs'
 import { FiPhoneOff } from 'react-icons/fi'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import MaskEngine from '../utils/MaskEngine'
 import PeerConnection from '../utils/PeerConnection'
-import { requestNotifyPermission } from '../utils/ringtone'
-import { getStoredId, getStoredName, setStoredName } from '../utils/session'
+import { getStoredId, getStoredName } from '../utils/session'
 import socket from '../utils/socket'
-import InCallChat from './InCallChat'
 import MaskPicker from './MaskPicker'
 import PeerTile from './PeerTile'
 
-/** Who creates the offer — avoids double-offer glare */
 function shouldOffer(localId, remoteId) {
   return String(localId) < String(remoteId)
 }
@@ -26,66 +23,51 @@ function gridClass(count) {
   return 'grid-10'
 }
 
-/**
- * Flow:
- * 1) Host creates room → already inside (admin)
- * 2) Guests open link → knock (joinPending) → host admit/deny
- * 3) Denied → can requestJoin again
- * 4) After joined → mesh WebRTC (up to 10)
- */
+function shouldRestart(pc) {
+  return ['failed', 'disconnected', 'closed'].includes(pc?.connectionState)
+}
+
 const Room = () => {
   const { roomId } = useParams()
   const navigate = useNavigate()
 
   const [localId, setLocalId] = useState('')
   const [roomInfo, setRoomInfo] = useState(null)
-  const [gate, setGate] = useState('loading') // loading | pending | denied | joined
-  const [hostName, setHostName] = useState('')
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const [messages, setMessages] = useState([])
-  const [maskId, setMaskId] = useState('glasses')
+  const [maskId, setMaskId] = useState('none')
   const [videoOn, setVideoOn] = useState(true)
   const [audioOn, setAudioOn] = useState(true)
-  const [maskReady, setMaskReady] = useState(false)
   const [mediaReady, setMediaReady] = useState(false)
-  const [displayNameInput, setDisplayNameInput] = useState(getStoredName() || 'Гость')
-  /** { [peerId]: MediaStream } */
   const [remoteStreams, setRemoteStreams] = useState({})
 
+  const localVideo = useRef(null)
   const localCanvas = useRef(null)
   const engineRef = useRef(null)
   const rawStreamRef = useRef(null)
   const outboundRef = useRef(null)
   const peersRef = useRef(new Map())
+  const queueRef = useRef(new Map())
   const localIdRef = useRef('')
   const mediaReadyRef = useRef(false)
-  const messagesRef = useRef([])
   const roomInfoRef = useRef(null)
-  const gateRef = useRef('loading')
+  const creatingRef = useRef(new Set())
 
-  const displayName = useCallback((id) => {
-    return roomInfoRef.current?.names?.[id] || id
+  const displayName = useCallback((id) => roomInfoRef.current?.names?.[id] || id, [])
+
+  const attachLocalPreview = useCallback((stream) => {
+    if (localVideo.current && stream) {
+      localVideo.current.srcObject = stream
+    }
   }, [])
-
-  const isHost = roomInfo?.host && roomInfo.host === localId
-  const waitingList = roomInfo?.waiting || []
-
-  const setChat = (next) => {
-    messagesRef.current = next
-    setMessages(next)
-  }
-
-  const addMessage = (message) => {
-    if (!message?.id || messagesRef.current.some((item) => item.id === message.id)) return
-    setChat([...messagesRef.current, message])
-  }
 
   const closePeer = useCallback((peerId) => {
     const pc = peersRef.current.get(peerId)
-    if (!pc) return
-    try { pc.stop(false) } catch { /* ignore */ }
+    if (pc && !pc.pending) {
+      try { pc.stop(false) } catch { /* ignore */ }
+    }
     peersRef.current.delete(peerId)
+    creatingRef.current.delete(peerId)
     setRemoteStreams((prev) => {
       if (!prev[peerId]) return prev
       const next = { ...prev }
@@ -98,89 +80,80 @@ const Room = () => {
     for (const id of [...peersRef.current.keys()]) closePeer(id)
   }, [closePeer])
 
-  const ensurePeer = useCallback(async (remoteId, asCaller) => {
+  const flushQueue = useCallback((peerId) => {
+    const pc = peersRef.current.get(peerId)
+    if (!pc || pc.pending) return
+    const queued = queueRef.current.get(peerId) || []
+    queueRef.current.set(peerId, [])
+    queued.forEach((data) => pc.applySignal(data))
+  }, [])
+
+  const ensurePeer = useCallback(async (remoteId, { restart = false } = {}) => {
     const me = localIdRef.current
     if (!remoteId || !me || remoteId === me) return null
-    if (gateRef.current !== 'joined') return null
     if (!mediaReadyRef.current || !outboundRef.current) return null
 
     const existing = peersRef.current.get(remoteId)
-    if (existing) {
-      if (existing.pending) {
-        for (let i = 0; i < 40; i += 1) {
-          await new Promise((r) => setTimeout(r, 50))
-          const next = peersRef.current.get(remoteId)
-          if (next && !next.pending) return next
-          if (!next) break
-        }
-        return peersRef.current.get(remoteId) || null
-      }
+    if (existing && !existing.pending && !restart && !['failed', 'closed'].includes(existing.connectionState)) {
+      flushQueue(remoteId)
       return existing
     }
 
+    if (creatingRef.current.has(remoteId) && !restart) {
+      for (let i = 0; i < 50; i += 1) {
+        await new Promise((r) => setTimeout(r, 50))
+        const next = peersRef.current.get(remoteId)
+        if (next && !next.pending) {
+          flushQueue(remoteId)
+          return next
+        }
+      }
+    }
+
+    if (existing) closePeer(remoteId)
+    creatingRef.current.add(remoteId)
     peersRef.current.set(remoteId, { pending: true })
 
     try {
-      const pc = await PeerConnection.create(remoteId)
-      if (!mediaReadyRef.current || !outboundRef.current || gateRef.current !== 'joined') {
+      const asCaller = shouldOffer(me, remoteId)
+      const pc = await PeerConnection.create(remoteId, { polite: !asCaller })
+      if (!mediaReadyRef.current || !outboundRef.current) {
         try { pc.stop(false) } catch { /* ignore */ }
         peersRef.current.delete(remoteId)
         return null
       }
 
-      pc
-        .on('remoteStream', (stream) => {
-          setRemoteStreams((prev) => ({ ...prev, [remoteId]: stream }))
-        })
-        .start(asCaller, { audio: true, video: true }, {
-          skipRequest: true,
-          stream: outboundRef.current
-        })
+      pc.on('remoteStream', (stream) => {
+        setRemoteStreams((prev) => ({ ...prev, [remoteId]: stream }))
+      })
+      pc.start(asCaller, { audio: true, video: true }, {
+        skipRequest: true,
+        stream: outboundRef.current
+      })
 
       peersRef.current.set(remoteId, pc)
+      flushQueue(remoteId)
       return pc
     } catch (err) {
       console.error('peer failed', remoteId, err)
       peersRef.current.delete(remoteId)
       return null
+    } finally {
+      creatingRef.current.delete(remoteId)
     }
-  }, [])
+  }, [closePeer, flushQueue])
 
-  const meshWithParticipants = useCallback((participants) => {
-    if (gateRef.current !== 'joined') return
+  const meshWith = useCallback((participants) => {
     const me = localIdRef.current
     if (!me || !mediaReadyRef.current) return
     const list = (participants || []).filter((id) => id && id !== me)
-
     for (const id of [...peersRef.current.keys()]) {
       if (!list.includes(id)) closePeer(id)
     }
-
-    list.forEach((id) => {
-      if (peersRef.current.has(id)) return
-      if (shouldOffer(me, id)) ensurePeer(id, true)
-    })
+    list.forEach((id) => { ensurePeer(id) })
   }, [closePeer, ensurePeer])
 
-  const enterJoined = useCallback((info, chat) => {
-    gateRef.current = 'joined'
-    setGate('joined')
-    roomInfoRef.current = info
-    setRoomInfo(info)
-    if (Array.isArray(chat)) setChat(chat)
-    setError('')
-    const link = `${window.location.origin}/room/${roomId}`
-    navigator.clipboard?.writeText(link).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2500)
-    }).catch(() => {})
-  }, [roomId])
-
-  // Socket lifecycle
   useEffect(() => {
-    requestNotifyPermission()
-    engineRef.current = new MaskEngine()
-
     const onInit = ({ id }) => {
       setLocalId(id)
       localIdRef.current = id
@@ -190,31 +163,11 @@ const Room = () => {
 
     socket
       .on('init', onInit)
-      .on('roomJoined', ({ roomInfo: info, chat, status }) => {
-        if (status && status !== 'joined') return
-        enterJoined(info, chat)
-        meshWithParticipants(info?.participants)
-      })
-      .on('joinPending', ({ hostName: hn, roomInfo: info }) => {
-        gateRef.current = 'pending'
-        setGate('pending')
-        setHostName(hn || '')
+      .on('roomJoined', ({ roomInfo: info }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
-      })
-      .on('joinDenied', ({ hostName: hn }) => {
-        gateRef.current = 'denied'
-        setGate('denied')
-        setHostName(hn || '')
-        closeAllPeers()
-      })
-      .on('joinRequest', ({ roomInfo: info }) => {
-        roomInfoRef.current = info
-        setRoomInfo(info)
-      })
-      .on('waitingUpdated', ({ roomInfo: info }) => {
-        roomInfoRef.current = info
-        setRoomInfo(info)
+        setError('')
+        meshWith(info?.participants)
       })
       .on('roomError', ({ message }) => {
         setError(message)
@@ -225,29 +178,40 @@ const Room = () => {
       .on('userJoined', ({ roomInfo: info, userId }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
-        if (gateRef.current !== 'joined') return
-        meshWithParticipants(info?.participants)
-        const me = localIdRef.current
-        if (userId && me && shouldOffer(me, userId)) ensurePeer(userId, true)
+        meshWith(info?.participants)
+        if (userId) ensurePeer(userId)
       })
       .on('userLeft', ({ roomInfo: info, userId }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
-        if (userId) closePeer(userId)
+        if (userId) {
+          queueRef.current.delete(userId)
+          closePeer(userId)
+        }
       })
       .on('hostChanged', ({ roomInfo: info }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
       })
-      .on('chatMessage', ({ message }) => {
-        if (gateRef.current === 'joined') addMessage(message)
+      .on('peerMediaReady', ({ userId, roomInfo: info }) => {
+        if (info) {
+          roomInfoRef.current = info
+          setRoomInfo(info)
+        }
+        if (!userId || userId === localIdRef.current) return
+        const existing = peersRef.current.get(userId)
+        ensurePeer(userId, { restart: Boolean(existing && !existing.pending && shouldRestart(existing)) })
       })
       .on('call', async (data) => {
-        if (gateRef.current !== 'joined') return
         const from = data?.from
         if (!from || from === localIdRef.current) return
-        const pc = await ensurePeer(from, false)
-        if (pc && !pc.pending) pc.applySignal(data)
+        const queued = queueRef.current.get(from) || []
+        queued.push(data)
+        queueRef.current.set(from, queued)
+        if (mediaReadyRef.current) {
+          await ensurePeer(from)
+          flushQueue(from)
+        }
       })
 
     const boot = () => socket.emit('init', { id: getStoredId() })
@@ -257,28 +221,21 @@ const Room = () => {
     return () => {
       closeAllPeers()
       socket.emit('leaveRoom')
-      ;['init', 'roomJoined', 'joinPending', 'joinDenied', 'joinRequest', 'waitingUpdated',
-        'roomError', 'userJoined', 'userLeft', 'hostChanged', 'chatMessage', 'call'
-      ].forEach((ev) => socket.off(ev))
+      ;['init', 'roomJoined', 'roomError', 'userJoined', 'userLeft', 'hostChanged', 'peerMediaReady', 'call']
+        .forEach((ev) => socket.off(ev))
       rawStreamRef.current?.getTracks().forEach((track) => track.stop())
       engineRef.current?.dispose()
     }
-  }, [roomId, navigate, meshWithParticipants, ensurePeer, closePeer, closeAllPeers, enterJoined])
+  }, [roomId, navigate, meshWith, ensurePeer, closePeer, closeAllPeers, flushQueue])
 
-  // Camera only after admitted
   useEffect(() => {
-    if (gate !== 'joined') return undefined
     if (!roomInfo || roomInfo.type === 'text') return undefined
     let cancelled = false
 
     const startPreview = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true
-          },
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
           video: {
             facingMode: 'user',
             width: { ideal: 640, max: 1280 },
@@ -291,65 +248,60 @@ const Room = () => {
           return
         }
         rawStreamRef.current = stream
-        const engine = engineRef.current
-        await engine.init()
-        await engine.setMask(maskId)
-        if (localCanvas.current) {
-          engine.attach({ stream, canvas: localCanvas.current })
-        }
-        const canvasStream = engine.getStream(24)
-        outboundRef.current = new MediaStream([
-          ...(canvasStream ? canvasStream.getVideoTracks() : stream.getVideoTracks()),
-          ...stream.getAudioTracks()
-        ])
-        setMaskReady(true)
+        outboundRef.current = stream
+        attachLocalPreview(stream)
         mediaReadyRef.current = true
         setMediaReady(true)
-        meshWithParticipants(roomInfoRef.current?.participants)
+        socket.emit('mediaReady')
+        meshWith(roomInfoRef.current?.participants)
       } catch (err) {
         console.error(err)
-        setError('Нужен доступ к камере и микрофону / Camera and microphone are required')
+        setError('Нужен доступ к камере и микрофону / Allow camera and microphone')
       }
     }
 
     startPreview()
-    return () => {
-      cancelled = true
-    }
-  }, [gate, roomInfo?.type, roomId, meshWithParticipants])
+    return () => { cancelled = true }
+  }, [roomInfo?.type, roomId, meshWith, attachLocalPreview])
 
   useEffect(() => {
-    if (mediaReady && gate === 'joined' && roomInfo?.participants) {
-      meshWithParticipants(roomInfo.participants)
-    }
-  }, [mediaReady, gate, roomInfo?.participants, meshWithParticipants])
+    if (mediaReady && roomInfo?.participants) meshWith(roomInfo.participants)
+  }, [mediaReady, roomInfo?.participants, meshWith])
 
-  const leaveRoom = () => {
-    closeAllPeers()
-    socket.emit('leaveRoom')
-    navigate('/')
+  const pushVideoTrack = (track) => {
+    peersRef.current.forEach((pc) => {
+      if (pc && !pc.pending) pc.replaceVideoTrack?.(track)
+    })
   }
-
-  const retryJoin = () => {
-    const name = displayNameInput.trim() || 'Гость'
-    setStoredName(name)
-    setGate('pending')
-    gateRef.current = 'pending'
-    socket.emit('requestJoin', { roomId, name })
-  }
-
-  const admit = (userId) => socket.emit('admitJoin', { userId })
-  const deny = (userId) => socket.emit('denyJoin', { userId })
 
   const changeMask = async (id) => {
     setMaskId(id)
-    await engineRef.current?.setMask(id)
-    const track = outboundRef.current?.getVideoTracks()?.[0]
-    if (track) {
-      peersRef.current.forEach((pc) => {
-        if (pc && !pc.pending) pc.replaceVideoTrack?.(track)
-      })
+    const raw = rawStreamRef.current
+    if (!raw) return
+
+    if (id === 'none') {
+      engineRef.current?.stop({ keepCanvas: true })
+      outboundRef.current = raw
+      attachLocalPreview(raw)
+      pushVideoTrack(raw.getVideoTracks()[0])
+      return
     }
+
+    if (!engineRef.current) engineRef.current = new MaskEngine()
+    const engine = engineRef.current
+    await engine.init()
+    await engine.setMask(id)
+    if (localCanvas.current) {
+      engine.attach({ stream: raw, canvas: localCanvas.current })
+    }
+    const canvasStream = engine.getStream(24)
+    const mixed = new MediaStream([
+      ...(canvasStream?.getVideoTracks() || raw.getVideoTracks()),
+      ...raw.getAudioTracks()
+    ])
+    outboundRef.current = mixed
+    attachLocalPreview(mixed)
+    pushVideoTrack(mixed.getVideoTracks()[0])
   }
 
   const toggleVideo = () => {
@@ -366,209 +318,87 @@ const Room = () => {
     outboundRef.current?.getAudioTracks().forEach((track) => { track.enabled = next })
   }
 
-  const sendMessage = (text) => {
-    const message = {
-      id: `${Date.now()}-${localIdRef.current}`,
-      from: localIdRef.current,
-      fromName: getStoredName() || localIdRef.current,
-      text,
-      ts: Date.now()
-    }
-    addMessage(message)
-    socket.emit('chatMessage', { text, id: message.id })
+  const leaveRoom = () => {
+    closeAllPeers()
+    socket.emit('leaveRoom')
+    navigate('/')
   }
 
   const copyLink = async () => {
     const link = `${window.location.origin}/room/${roomId}`
-    await navigator.clipboard.writeText(link)
+    try { await navigator.clipboard.writeText(link) } catch { /* ignore */ }
     setCopied(true)
     setTimeout(() => setCopied(false), 1600)
   }
 
-  // ── Waiting / denied gate (guest) ──────────────────────────
-  if (gate === 'pending' || gate === 'denied' || gate === 'loading') {
-    return (
-      <div className="landing">
-        <div className="landing-card">
-          <p className="eyebrow">Комната / Room {roomId}</p>
-          <h1>
-            {gate === 'denied'
-              ? 'Вход отклонён'
-              : gate === 'pending'
-                ? 'Ожидание хоста…'
-                : 'Подключение…'}
-          </h1>
-          <p className="lead">
-            {gate === 'denied'
-              ? 'Хост не пустил. Можно попросить снова.'
-              : gate === 'pending'
-                ? `Запрос отправлен${hostName ? ` · хост: ${hostName}` : ''}. Ждите «Принять».`
-                : 'Стук в комнату…'}
-          </p>
-          <p className="lead en">
-            {gate === 'denied'
-              ? 'Host declined. You can ask to join again.'
-              : 'Knock to join — host must accept (not the same as a phone call).'}
-          </p>
-
-          {(gate === 'pending' || gate === 'denied') && (
-            <label className="field">
-              <span>Ваше имя / Your name</span>
-              <input
-                value={displayNameInput}
-                maxLength={24}
-                onChange={(e) => setDisplayNameInput(e.target.value)}
-              />
-            </label>
-          )}
-
-          {gate === 'denied' && (
-            <button type="button" className="btn btn-success" onClick={retryJoin}>
-              Попросить снова / Ask again
-            </button>
-          )}
-
-          {error && <div className="error">{error}</div>}
-
-          <button type="button" className="btn btn-outline" style={{ marginTop: '1rem' }} onClick={leaveRoom}>
-            <BsArrowLeft /> Назад / Back
-          </button>
-        </div>
-      </div>
-    )
-  }
-
-  const isTextRoom = roomInfo?.type === 'text'
   const peerIds = Object.keys(remoteStreams)
-  const tileCount = Math.max(1, 1 + peerIds.length)
-  const alone = peerIds.length === 0
+  const others = (roomInfo?.participants || []).filter((id) => id !== localId)
+  const tiles = others.length ? others : []
+  const tileCount = 1 + Math.max(tiles.length, peerIds.length ? peerIds.length : 0)
 
   return (
-    <div className={`meet-room ${!alone ? 'is-call' : ''}`}>
+    <div className="meet-room">
       <header className="meet-header">
-        <button type="button" className="btn btn-outline" onClick={leaveRoom}>
-          <BsArrowLeft /> Назад / Back
-        </button>
         <div>
-          <h1>
-            {isTextRoom ? 'Текстовый чат' : 'Встреча / Meeting'}
-            {isHost ? ' · вы хост' : ''}
-          </h1>
-          <p>
-            {roomInfo?.participantCount || 0} в комнате
-            {waitingList.length ? ` · ${waitingList.length} ждут` : ''}
-            {copied ? ' · ссылка ✓' : ''}
-          </p>
+          <h1>{roomInfo?.participantCount || 1} в встрече</h1>
+          <p>{copied ? 'Ссылка скопирована' : 'Отправьте ссылку — кто откроет, тот в эфире'}</p>
         </div>
         <button type="button" className="btn btn-success" onClick={copyLink}>
-          {copied ? <BsCheck /> : <BsCopy />} {copied ? 'Скопировано!' : 'Ссылка / Link'}
+          {copied ? <BsCheck /> : <BsCopy />} {copied ? 'Готово' : 'Ссылка'}
         </button>
       </header>
-
-      {isHost && waitingList.length > 0 && (
-        <div className="admit-bar">
-          <strong>Хотят войти / Waiting:</strong>
-          {waitingList.map((item) => (
-            <div key={item.id} className="admit-row">
-              <span>{item.name}</span>
-              <button type="button" className="btn btn-success btn-small" onClick={() => admit(item.id)}>
-                Принять / Admit
-              </button>
-              <button type="button" className="btn btn-danger btn-small" onClick={() => deny(item.id)}>
-                Отклонить / Deny
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
       {error && (
         <div className="error">
           {error}
-          {error.toLowerCase().includes('камер') && (
-            <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
-              Повторить / Retry
-            </button>
-          )}
+          <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
+            Повторить
+          </button>
         </div>
       )}
 
-      {isTextRoom ? (
-        <div className="text-room">
-          <div className="people-list">
-            {roomInfo?.participants?.map((id) => (
-              <span key={id} className="person">
-                {displayName(id)} {id === localId ? '(Вы)' : ''}
-              </span>
-            ))}
-          </div>
-          <InCallChat
-            messages={messages}
-            onSend={sendMessage}
-            localId={localId}
-            hint="Сообщения в RAM · очистятся когда все выйдут"
+      <section className={`meet-grid ${gridClass(Math.max(1, tileCount))}`}>
+        <div className={`meet-tile meet-tile-local ${videoOn ? '' : 'is-off'}`}>
+          <video ref={localVideo} className="mirror" autoPlay playsInline muted />
+          <canvas ref={localCanvas} className="mask-canvas-hidden" />
+          {!videoOn && <div className="meet-tile-empty">{(getStoredName() || 'Вы').slice(0, 1)}</div>}
+          <span className="video-label">Вы</span>
+        </div>
+
+        {tiles.map((id) => (
+          <PeerTile
+            key={id}
+            stream={remoteStreams[id]}
+            name={displayName(id)}
+            videoOff={!remoteStreams[id]}
           />
+        ))}
+      </section>
+
+      <footer className="meet-controls">
+        <div className="control-buttons">
+          <button
+            type="button"
+            className={`ctrl ${audioOn ? '' : 'ctrl-off'}`}
+            onClick={toggleAudio}
+            title={audioOn ? 'Выкл. микрофон' : 'Вкл. микрофон'}
+          >
+            {audioOn ? <BsMicFill /> : <BsMicMuteFill />}
+          </button>
+          <button
+            type="button"
+            className={`ctrl ${videoOn ? '' : 'ctrl-off'}`}
+            onClick={toggleVideo}
+            title={videoOn ? 'Выкл. камеру' : 'Вкл. камеру'}
+          >
+            {videoOn ? <BsCameraVideo /> : <BsCameraVideoOff />}
+          </button>
+          <MaskPicker value={maskId} onChange={changeMask} disabled={!mediaReady} />
+          <button type="button" className="ctrl ctrl-leave" onClick={leaveRoom} title="Выйти">
+            <FiPhoneOff />
+          </button>
         </div>
-      ) : (
-        <div className="meet-body meet-body-full">
-          <section className={`meet-grid ${gridClass(tileCount)}`}>
-            <div className="meet-tile meet-tile-local">
-              <canvas ref={localCanvas} className="local-canvas" />
-              <span className="video-label">
-                Вы / You{maskReady ? '' : ' · маска…'}
-              </span>
-            </div>
-
-            {alone && (
-              <div className="meet-tile meet-tile-wait">
-                <div className="meet-tile-empty">+</div>
-                <span className="video-label">
-                  {isHost
-                    ? 'Шлите ссылку — вы примете гостей'
-                    : 'Ждём остальных'}
-                </span>
-              </div>
-            )}
-
-            {peerIds.map((id) => (
-              <PeerTile key={id} stream={remoteStreams[id]} name={displayName(id)} />
-            ))}
-          </section>
-
-          <InCallChat
-            messages={messages}
-            onSend={sendMessage}
-            localId={localId}
-            hint="До 10 участников · видео обрезается как в Meet"
-          />
-        </div>
-      )}
-
-      {!isTextRoom && (
-        <footer className="meet-controls">
-          <MaskPicker value={maskId} onChange={changeMask} disabled={!maskReady} />
-          <div className="control-buttons">
-            <button type="button" className={`btn ${videoOn ? 'btn-secondary' : 'btn-danger'}`} onClick={toggleVideo}>
-              <BsCameraVideo />
-            </button>
-            <button type="button" className={`btn ${audioOn ? 'btn-secondary' : 'btn-danger'}`} onClick={toggleAudio}>
-              <BsPhone />
-            </button>
-            <button type="button" className="btn btn-danger" onClick={leaveRoom}>
-              <FiPhoneOff /> Выйти / Leave
-            </button>
-          </div>
-          <div className="people-list">
-            {roomInfo?.participants?.map((id) => (
-              <span key={id} className={`person ${remoteStreams[id] || id === localId ? 'live' : ''}`}>
-                {displayName(id)}
-                {id === localId ? ' (Вы)' : ''}
-                {id === roomInfo.host ? ' ★' : ''}
-              </span>
-            ))}
-          </div>
-        </footer>
-      )}
+      </footer>
     </div>
   )
 }

@@ -4,12 +4,15 @@ import MediaDevice from './MediaDevices'
 import socket from './socket'
 
 class PeerConnection extends Emitter {
-  constructor(remoteId, iceServers) {
+  constructor(remoteId, iceServers, { polite = false } = {}) {
     super()
     this.remoteId = remoteId
+    this.polite = polite
     this.pendingRemote = null
     this.pendingCandidates = []
     this.channel = null
+    this.makingOffer = false
+    this.remoteStream = new MediaStream()
 
     this.pc = new RTCPeerConnection({
       iceServers: iceServers || [{ urls: ['stun:stun.cloudflare.com:3478'] }]
@@ -20,8 +23,11 @@ class PeerConnection extends Emitter {
       socket.emit('call', { to: this.remoteId, candidate })
     }
 
-    this.pc.ontrack = ({ streams }) => {
-      if (streams[0]) this.emit('remoteStream', streams[0])
+    this.pc.ontrack = ({ track }) => {
+      if (!track) return
+      const exists = this.remoteStream.getTracks().some((item) => item.id === track.id)
+      if (!exists) this.remoteStream.addTrack(track)
+      this.emit('remoteStream', this.remoteStream)
     }
 
     this.pc.onconnectionstatechange = () => {
@@ -32,9 +38,13 @@ class PeerConnection extends Emitter {
     this.getDescription = this.getDescription.bind(this)
   }
 
-  static async create(remoteId) {
+  static async create(remoteId, options = {}) {
     const iceServers = await getIceServers()
-    return new PeerConnection(remoteId, iceServers)
+    return new PeerConnection(remoteId, iceServers, options)
+  }
+
+  get connectionState() {
+    return this.pc.connectionState
   }
 
   start(isCaller, config, options = {}) {
@@ -53,7 +63,9 @@ class PeerConnection extends Emitter {
 
     const onReady = (mediaStream) => {
       mediaStream.getTracks().forEach((track) => {
-        this.pc.addTrack(track, mediaStream)
+        const sender = this.pc.getSenders().find((item) => item.track?.kind === track.kind)
+        if (sender) sender.replaceTrack(track)
+        else this.pc.addTrack(track, mediaStream)
       })
       this.emit('localStream', mediaStream)
 
@@ -103,8 +115,9 @@ class PeerConnection extends Emitter {
   }
 
   replaceVideoTrack(track) {
-    const videoSender = this.pc.getSenders().find((item) => item.track?.kind === 'video')
-    if (videoSender && track) videoSender.replaceTrack(track)
+    const videoSender = this.pc.getSenders().find((item) => item.track?.kind === 'video' || item.track == null)
+    const sender = videoSender || this.pc.getSenders().find((item) => item.track?.kind === 'video')
+    if (sender && track) sender.replaceTrack(track)
     return this
   }
 
@@ -119,9 +132,11 @@ class PeerConnection extends Emitter {
   }
 
   createOffer() {
+    this.makingOffer = true
     this.pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true })
       .then(this.getDescription)
       .catch(console.error)
+      .finally(() => { this.makingOffer = false })
     return this
   }
 
@@ -141,13 +156,26 @@ class PeerConnection extends Emitter {
   applySignal(data) {
     if (data.sdp) {
       const desc = new RTCSessionDescription(data.sdp)
-      const apply = () => this.pc.setRemoteDescription(desc).then(() => {
+      const offerCollision = desc.type === 'offer'
+        && (this.makingOffer || this.pc.signalingState !== 'stable')
+
+      if (offerCollision && !this.polite) {
+        return this
+      }
+
+      const apply = async () => {
+        if (offerCollision && this.polite && this.pc.signalingState !== 'stable') {
+          try {
+            await this.pc.setLocalDescription({ type: 'rollback' })
+          } catch { /* ignore */ }
+        }
+        await this.pc.setRemoteDescription(desc)
         this.flushCandidates()
-        if (data.sdp.type === 'offer') this.createAnswer()
-      })
+        if (desc.type === 'offer') this.createAnswer()
+      }
 
       if (this.pc.signalingState === 'closed') return this
-      if (!this.pc.getSenders().length && data.sdp.type === 'offer') {
+      if (!this.pc.getSenders().length && desc.type === 'offer') {
         this.pendingRemote = data
         return this
       }

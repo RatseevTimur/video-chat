@@ -258,48 +258,34 @@ export default function initSocket(socket) {
         return
       }
 
-      // Text rooms: auto-join (no waiting room)
-      if (room.type === 'text') {
-        if (room.participants.length >= MAX_PARTICIPANTS) {
-          socket.emit('roomError', { message: 'Комната заполнена / Room is full' })
-          return
-        }
-        room.participants.push(state.id)
-        room.names[state.id] = name
-        room.emptyAt = 0
-        state.currentRoom = roomId
-        socket.join(roomId)
-        emitToRoom(roomId, 'userJoined', {
-          userId: state.id,
-          roomInfo: getRoomInfo(roomId)
-        }, socket)
-        socket.emit('roomJoined', {
-          roomId,
-          status: 'joined',
-          roomInfo: getRoomInfo(roomId),
-          chat: room.chat || []
-        })
-        return
-      }
-
-      // Video: knock / waiting room (can retry after deny)
       if (room.participants.length >= MAX_PARTICIPANTS) {
         socket.emit('roomError', { message: 'Комната заполнена / Room is full' })
         return
       }
 
-      room.waiting[state.id] = { name, at: Date.now() }
+      room.participants.push(state.id)
+      room.names[state.id] = name
+      room.emptyAt = 0
       state.currentRoom = roomId
-      socket.emit('joinPending', {
-        roomId,
-        hostName: room.names[room.host] || room.host,
-        roomInfo: getRoomInfo(roomId)
-      })
-      emit(room.host, 'joinRequest', {
+      socket.join(roomId)
+      emitToRoom(roomId, 'userJoined', {
         userId: state.id,
-        name,
         roomInfo: getRoomInfo(roomId)
+      }, socket)
+      socket.emit('roomJoined', {
+        roomId,
+        status: 'joined',
+        roomInfo: getRoomInfo(roomId),
+        chat: room.chat || []
       })
+    })
+    .on('mediaReady', () => {
+      const room = rooms[state.currentRoom]
+      if (!room || !state.id || !room.participants.includes(state.id)) return
+      emitToRoom(state.currentRoom, 'peerMediaReady', {
+        userId: state.id,
+        roomInfo: getRoomInfo(state.currentRoom)
+      }, socket)
     })
     .on('requestJoin', (data = {}) => {
       // Second (nth) attempt after deny — same as knocking again

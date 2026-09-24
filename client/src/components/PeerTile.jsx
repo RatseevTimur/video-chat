@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 
-/** One remote participant tile — object-fit:cover like Google Meet */
-function PeerTile({ stream, name, muted = false }) {
+function PeerTile({ stream, name, muted = false, mirror = false, videoOff = false }) {
   const videoRef = useRef(null)
 
   useEffect(() => {
@@ -13,12 +12,14 @@ function PeerTile({ stream, name, muted = false }) {
     }
   }, [stream])
 
+  const letter = (name || '?').slice(0, 1).toUpperCase()
+
   return (
-    <div className="meet-tile">
-      {stream ? (
-        <video ref={videoRef} autoPlay playsInline muted={muted} />
+    <div className={`meet-tile ${videoOff || !stream ? 'is-off' : ''}`}>
+      {stream && !videoOff ? (
+        <video ref={videoRef} autoPlay playsInline muted={muted} className={mirror ? 'mirror' : ''} />
       ) : (
-        <div className="meet-tile-empty">{(name || '?').slice(0, 1).toUpperCase()}</div>
+        <div className="meet-tile-empty">{letter}</div>
       )}
       <span className="video-label">{name}</span>
     </div>
