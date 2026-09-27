@@ -104,43 +104,87 @@ echo ""
 echo "==> FREE MEET MODE (no email) — rebuild client"
 rm -rf client/dist
 yarn --cwd client build
-echo "==> Starting server"
-yarn --cwd server start &
+
+# Survive SSH disconnect even without nohup
+trap '' HUP
+
+echo "==> Starting server (node, not yarn — yarn exits and used to kill the tunnel)"
+(
+  cd server
+  exec node index.js
+) &
 SERVER_PID=$!
 
-cleanup() { kill "$SERVER_PID" 2>/dev/null || true; [ -n "${TUNNEL_PID:-}" ] && kill "$TUNNEL_PID" 2>/dev/null || true; }
+TUNNEL_PID=""
+cleanup() {
+  [ -n "${TUNNEL_PID:-}" ] && kill "$TUNNEL_PID" 2>/dev/null || true
+  kill "$SERVER_PID" 2>/dev/null || true
+  # orphaned children from restart loop
+  pkill -f "cloudflared tunnel --url https://127.0.0.1:${PORT}" 2>/dev/null || true
+}
 trap cleanup EXIT INT TERM
-sleep 2
 
-BIN="$(cf)"
-if [ -n "$BIN" ] && [ "${TUNNEL:-1}" = "1" ]; then
-  LOG="$(mktemp)"
-  "$BIN" tunnel --url "https://127.0.0.1:${PORT}" --no-tls-verify >"$LOG" 2>&1 &
-  TUNNEL_PID=$!
-  PUBLIC=""
-  for _ in $(seq 1 50); do
-    PUBLIC="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG" | head -1 || true)"
-    [ -n "$PUBLIC" ] && break
-    sleep 0.4
-  done
-  if [ -n "$PUBLIC" ]; then
-    curl -sk -X POST "https://127.0.0.1:${PORT}/api/runtime/public-url" \
-      -H 'Content-Type: application/json' \
-      -d "{\"invite\":\"${INVITE}\",\"url\":\"${PUBLIC}\"}" >/dev/null 2>&1 || true
+# Wait until HTTPS answers (self-signed ok)
+for _ in $(seq 1 40); do
+  curl -sk "https://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 && break
+  sleep 0.25
+done
+
+publish_url() {
+  local PUBLIC="$1"
+  printf '%s\n' "$PUBLIC" > public-url.txt
+  curl -sk -X POST "https://127.0.0.1:${PORT}/api/runtime/public-url" \
+    -H 'Content-Type: application/json' \
+    -d "{\"invite\":\"${INVITE}\",\"url\":\"${PUBLIC}\"}" >/dev/null 2>&1 || true
+  OPEN_ROOM="${OPEN_ROOM:-$(openssl rand -hex 4)}"
+  {
     echo ""
     echo "════════════════════════════════════════════════════════"
     echo "  СВОБОДНЫЙ РЕЖИМ — откройте и создайте ссылку:"
     echo "  → ${PUBLIC}/"
     echo ""
     echo "  Или сразу общая комната (все по одной ссылке):"
-    OPEN_ROOM="${OPEN_ROOM:-$(openssl rand -hex 4)}"
     echo "  → ${PUBLIC}/room/${OPEN_ROOM}"
     echo ""
     echo "  Family (email OTP, optional):"
     echo "  → ${PUBLIC}/family?invite=${INVITE}"
     echo "════════════════════════════════════════════════════════"
     echo ""
-  fi
+  } | tee -a chat.url
+}
+
+BIN="$(cf)"
+if [ -n "$BIN" ] && [ "${TUNNEL:-1}" = "1" ]; then
+  LOG="$(pwd)/tunnel.log"
+  : >"$LOG"
+  # Keep tunnel alive: if cloudflared dies, URL dies (NXDOMAIN)
+  (
+    while kill -0 "$SERVER_PID" 2>/dev/null; do
+      "$BIN" tunnel --url "https://127.0.0.1:${PORT}" --no-tls-verify >>"$LOG" 2>&1 &
+      CF_PID=$!
+      echo "$CF_PID" > tunnel.pid
+      # wait for hostname once per process
+      for _ in $(seq 1 60); do
+        PUBLIC="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' "$LOG" | tail -1 || true)"
+        if [ -n "$PUBLIC" ]; then
+          # only announce when URL changes
+          if [ ! -f public-url.txt ] || [ "$(cat public-url.txt 2>/dev/null)" != "$PUBLIC" ]; then
+            publish_url "$PUBLIC"
+          fi
+          break
+        fi
+        kill -0 "$CF_PID" 2>/dev/null || break
+        sleep 0.5
+      done
+      wait "$CF_PID" 2>/dev/null || true
+      rm -f tunnel.pid
+      kill -0 "$SERVER_PID" 2>/dev/null || break
+      echo "==> cloudflared exited — restarting tunnel in 2s…"
+      sleep 2
+      : >"$LOG"
+    done
+  ) &
+  TUNNEL_PID=$!
 fi
 
 wait "$SERVER_PID"
