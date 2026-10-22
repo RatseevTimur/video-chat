@@ -1,0 +1,18 @@
+# Render's Node preset runs these two commands. postinstall builds the app.
+services:
+  - type: web
+    name: video-chat
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: yarn --frozen-lockfile install
+    startCommand: node index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: NODE_ENV
+        value: production
+      - key: INVITE
+        generateValue: true

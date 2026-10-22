@@ -9,6 +9,8 @@
   },
   "scripts": {
     "dev": "concurrently \"yarn --cwd server dev\" \"yarn --cwd client dev\"",
+    "build": "yarn --cwd client install --frozen-lockfile --production=false && yarn --cwd client build && yarn --cwd server install --frozen-lockfile",
+    "postinstall": "node scripts/render-postinstall.cjs",
     "client:install": "cd client && yarn",
     "client:build": "cd client && yarn build",
     "server:install": "cd server && yarn",

@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import express from 'express'
+import { existsSync } from 'fs'
 import { createServer as createHttpServer } from 'http'
 import { createServer as createHttpsServer } from 'https'
 import { dirname, join } from 'path'
@@ -14,6 +15,11 @@ import { ensureTls } from './utils/tls.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const app = express()
 const port = getPort()
+const distIndex = join(__dirname, '../client/dist/index.html')
+// Render's proxy terminates TLS and forwards plain HTTP to $PORT.
+const behindProxy = process.env.RENDER === 'true' || process.env.FORCE_HTTP === '1'
+
+if (behindProxy) app.set('trust proxy', 1)
 
 app.disable('x-powered-by')
 app.use((req, res, next) => {
@@ -55,13 +61,18 @@ app.get('*', (req, res, next) => {
 
 let server
 let protocol = 'https'
-try {
-  const tls = ensureTls()
-  server = createHttpsServer(tls, app)
-} catch (error) {
-  console.warn('HTTPS unavailable (openssl?), falling back to HTTP:', error.message)
+if (behindProxy) {
   server = createHttpServer(app)
   protocol = 'http'
+} else {
+  try {
+    const tls = ensureTls()
+    server = createHttpsServer(tls, app)
+  } catch (error) {
+    console.warn('HTTPS unavailable (openssl?), falling back to HTTP:', error.message)
+    server = createHttpServer(app)
+    protocol = 'http'
+  }
 }
 
 const io = new Server(server, {
@@ -70,6 +81,11 @@ const io = new Server(server, {
 })
 
 io.on('connection', initSocket)
+
+if (behindProxy && !existsSync(distIndex)) {
+  console.error('Missing client/dist/index.html. Build command on Render must be: yarn build')
+  process.exit(1)
+}
 
 server.listen(port, '0.0.0.0', () => {
   printBanner(protocol)

@@ -20,7 +20,7 @@ const emailSockets = new Map()
 
 let INVITE = process.env.INVITE || randomBytes(9).toString('base64url')
 const PORT = Number(process.env.PORT || 4000)
-let PUBLIC_URL = (process.env.PUBLIC_URL || '').replace(/\/$/, '')
+let PUBLIC_URL = (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '')
 
 function now() {
   return Date.now()

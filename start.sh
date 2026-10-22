@@ -3,6 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Render terminates TLS and forwards HTTP to $PORT. Skip apt, certs, and the tunnel.
+if [ "${RENDER:-}" = "true" ]; then
+  exec yarn --cwd server start
+fi
+
 echo "==> Family Chat · one-command start"
 echo ""
 
