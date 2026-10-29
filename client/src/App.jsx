@@ -13,7 +13,7 @@ import Room from './components/Room'
 import RoomManager from './components/RoomManager'
 import PeerConnection from './utils/PeerConnection'
 import { resubscribeSaved, watchSavedRooms } from './utils/push'
-import { createRingtone } from './utils/ringtone'
+import { createRingtone, startVibrate, stopVibrate } from './utils/ringtone'
 import { getStoredId, getStoredName } from './utils/session'
 import socket from './utils/socket'
 import './styles/app.scss'
@@ -42,6 +42,7 @@ export default function App() {
     return () => {
       socket.off('connect', joinWatch)
       ringtoneRef.current?.stop()
+      stopVibrate()
     }
   }, [])
 
@@ -57,10 +58,10 @@ export default function App() {
         roomId,
         fromName: payload.fromName || 'Участник'
       })
-      if (document.visibilityState !== 'visible') return
       ringtoneRef.current?.stop()
       ringtoneRef.current = createRingtone()
       ringtoneRef.current.start()
+      startVibrate()
     }
 
     const onServiceMessage = (event) => {
@@ -68,6 +69,7 @@ export default function App() {
       if (event.data?.type === 'navigate-call' && event.data.url) {
         const path = String(event.data.url).replace(window.location.origin, '')
         ringtoneRef.current?.stop()
+        stopVibrate()
         setIncoming(null)
         navigate(path.startsWith('/') ? path : `/${path}`)
       }
@@ -174,6 +176,7 @@ export default function App() {
   const answerRing = () => {
     const roomId = incoming?.roomId
     ringtoneRef.current?.stop()
+    stopVibrate()
     setIncoming(null)
     if (roomId) navigate(`/room/${roomId}`)
   }
@@ -183,6 +186,7 @@ export default function App() {
       socket.emit('ringDeclined', { roomId: incoming.roomId, name: getStoredName() || 'Участник' })
     }
     ringtoneRef.current?.stop()
+    stopVibrate()
     setIncoming(null)
   }
 

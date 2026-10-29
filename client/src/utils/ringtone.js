@@ -41,6 +41,22 @@ export function createRingtone() {
   }
 }
 
+let vibrateTimer = null
+
+export function startVibrate() {
+  if (!navigator.vibrate) return
+  stopVibrate()
+  const pulse = () => navigator.vibrate([520, 160, 520, 160, 740])
+  pulse()
+  vibrateTimer = setInterval(pulse, 1600)
+}
+
+export function stopVibrate() {
+  if (vibrateTimer) clearInterval(vibrateTimer)
+  vibrateTimer = null
+  navigator.vibrate?.(0)
+}
+
 export function notifyIncoming(title, body) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return
   try {

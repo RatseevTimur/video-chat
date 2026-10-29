@@ -1,11 +1,11 @@
 import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision'
 
+import { acceptedTracks, aimCrop, approach, groupBox, smoothCrop, updateTracks } from './framing'
 import { getMaskById, loadMaskImage } from './masks'
 
 const WASM_URL = '/mediapipe/wasm'
 const MODEL_URL = '/models/blaze_face_short_range.tflite'
 const DETECT_WIDTH = 320
-const SMOOTH = 0.28
 const OUT_LONG = 960
 
 function fitSize(srcW, srcH) {
@@ -23,23 +23,6 @@ const emptyPose = () => ({
   rotation: 0,
   visible: 0
 })
-
-function coverCrop(srcW, srcH, dstW, dstH, faceX, faceY) {
-  const srcAspect = srcW / srcH
-  const dstAspect = dstW / dstH
-  let cropW
-  let cropH
-  if (srcAspect > dstAspect) {
-    cropH = srcH
-    cropW = srcH * dstAspect
-  } else {
-    cropW = srcW
-    cropH = srcW / dstAspect
-  }
-  const cx = Math.max(0, Math.min(srcW - cropW, faceX * srcW - cropW / 2))
-  const cy = Math.max(0, Math.min(srcH - cropH, faceY * srcH - cropH / 2))
-  return { x: cx, y: cy, w: cropW, h: cropH }
-}
 
 export default class MaskEngine {
   constructor() {
@@ -61,6 +44,10 @@ export default class MaskEngine {
     this.detectCtx = this.detectCanvas.getContext('2d', { alpha: false })
     this.outputStream = null
     this.crop = { x: 0, y: 0, w: 1, h: 1 }
+    this.viewCrop = null
+    this.aim = null
+    this.tracks = []
+    this.lost = 0
     this.fps = 24
     this.onSize = null
   }
@@ -75,7 +62,7 @@ export default class MaskEngine {
         delegate: 'GPU'
       },
       runningMode: 'VIDEO',
-      minDetectionConfidence: 0.45
+      minDetectionConfidence: 0.35
     }
 
     try {
@@ -191,15 +178,17 @@ export default class MaskEngine {
       }
     }
 
-    this.pose.x += (this.target.x - this.pose.x) * SMOOTH
-    this.pose.y += (this.target.y - this.pose.y) * SMOOTH
-    this.pose.scale += (this.target.scale - this.pose.scale) * SMOOTH
-    this.pose.rotation += (this.target.rotation - this.pose.rotation) * SMOOTH
-    this.pose.visible += (this.target.visible - this.pose.visible) * SMOOTH
+    const poseAlpha = 0.08
+    this.pose.x = approach(this.pose.x, this.target.x, poseAlpha, 0.008)
+    this.pose.y = approach(this.pose.y, this.target.y, poseAlpha, 0.008)
+    this.pose.scale = approach(this.pose.scale, this.target.scale, poseAlpha, 0.004)
+    this.pose.rotation = approachAngle(this.pose.rotation, this.target.rotation, poseAlpha, 0.04)
+    this.pose.visible = approach(this.pose.visible, this.target.visible, 0.06, 0.01)
 
-    const faceX = this.pose.visible > 0.2 ? this.pose.x : 0.5
-    const faceY = this.pose.visible > 0.2 ? this.pose.y : 0.38
-    const crop = coverCrop(width, height, canvas.width, canvas.height, faceX, faceY)
+    const full = { x: 0, y: 0, w: width, h: height }
+    const desired = this.lost > 18 ? full : (this.aim || full)
+    this.viewCrop = smoothCrop(this.viewCrop, desired, this.lost > 18 ? 0.02 : 0.065)
+    const crop = this.viewCrop
     this.crop = crop
 
     ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, canvas.width, canvas.height)
@@ -234,39 +223,96 @@ export default class MaskEngine {
       this.detectCtx.drawImage(video, 0, 0, DETECT_WIDTH, detectHeight)
 
       const result = this.detector.detectForVideo(this.detectCanvas, performance.now())
-      const detection = result?.detections?.[0]
-      if (!detection) {
-        this.target.visible = Math.max(0, this.target.visible - 0.15)
+      const faces = (result?.detections || [])
+        .map((detection) => faceFromDetection(detection, this.detectCanvas.width, this.detectCanvas.height))
+        .filter(Boolean)
+      this.tracks = updateTracks(this.tracks, faces)
+      const stable = acceptedTracks(this.tracks)
+      if (!stable.length) {
+        this.lost += 1
+        this.target.visible = Math.max(0, this.target.visible - 0.03)
         return
       }
 
-      const keypoints = indexKeypoints(detection.keypoints)
-      const a = keypoints.leftEye
-      const b = keypoints.rightEye
-      if (!a || !b) {
-        this.target.visible = 0
-        return
-      }
-
-      // Image-space left/right — avoids ~180° rotate that flipped masks
-      const left = a.x <= b.x ? a : b
-      const right = a.x <= b.x ? b : a
-      const dx = right.x - left.x
-      const dy = right.y - left.y
-      const dist = Math.hypot(dx, dy)
-      this.target = {
-        x: (left.x + right.x) / 2,
-        y: (left.y + right.y) / 2 + (this.mask.offsetY || 0),
-        scale: dist * (this.mask.scale || 0),
-        rotation: Math.atan2(dy, dx),
-        visible: 1
-      }
+      this.lost = 0
+      const box = groupBox(stable)
+      if (box) this.aim = aimCrop(box, width, height)
+      const primary = stable.reduce((best, track) => (
+        track.w * track.h > best.w * best.h ? track : best
+      ))
+      this.target = maskTarget(primary, this.mask, this.target)
     } catch {
-      this.target.visible = 0
+      this.lost += 1
+      this.target.visible = Math.max(0, this.target.visible - 0.03)
     } finally {
       this.busy = false
     }
   }
+}
+
+function faceFromDetection(detection, canvasW, canvasH) {
+  const box = detection?.boundingBox
+  const score = detection?.categories?.[0]?.score ?? 0
+  if (!box || !canvasW || !canvasH || score < 0.35) return null
+  const w = box.width / canvasW
+  const h = box.height / canvasH
+  if (w < 0.04 || h < 0.04 || w > 0.98 || h > 0.98) return null
+  const keypoints = indexKeypoints(detection.keypoints)
+  return {
+    cx: (box.originX + box.width / 2) / canvasW,
+    cy: (box.originY + box.height / 2) / canvasH,
+    w,
+    h,
+    score,
+    eyes: eyePose(keypoints)
+  }
+}
+
+function eyePose(keypoints) {
+  const a = keypoints.leftEye
+  const b = keypoints.rightEye
+  if (!a || !b) return null
+  const left = a.x <= b.x ? a : b
+  const right = a.x <= b.x ? b : a
+  const dx = right.x - left.x
+  const dy = right.y - left.y
+  const dist = Math.hypot(dx, dy)
+  if (dist < 0.01) return null
+  return {
+    x: (left.x + right.x) / 2,
+    y: (left.y + right.y) / 2,
+    dist,
+    rotation: Math.atan2(dy, dx)
+  }
+}
+
+function maskTarget(track, mask, previous) {
+  const eyes = track.eyes
+  if (!eyes) {
+    return {
+      x: track.cx,
+      y: track.cy,
+      scale: track.w * (mask.scale || 0),
+      rotation: previous.rotation || 0,
+      visible: 1
+    }
+  }
+  let rotation = eyes.rotation
+  const turn = Math.atan2(Math.sin(rotation - (previous.rotation || 0)), Math.cos(rotation - (previous.rotation || 0)))
+  if (Math.abs(turn) > 0.45 && (previous.visible || 0) > 0.4) rotation = previous.rotation
+  return {
+    x: eyes.x,
+    y: eyes.y + (mask.offsetY || 0),
+    scale: eyes.dist * (mask.scale || 0),
+    rotation,
+    visible: 1
+  }
+}
+
+function approachAngle(current, next, alpha, dead) {
+  const delta = Math.atan2(Math.sin(next - current), Math.cos(next - current))
+  if (Math.abs(delta) <= dead) return current
+  return current + delta * alpha
 }
 
 function indexKeypoints(keypoints = []) {

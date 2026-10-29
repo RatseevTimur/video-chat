@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BsCameraVideo, BsLink45Deg } from 'react-icons/bs'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
+import { listRooms, rememberRoom } from '../utils/rooms'
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
 import InstallHint from './InstallHint'
@@ -13,6 +14,7 @@ const RoomManager = () => {
   const [name, setName] = useState(getStoredName() || 'Гость')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [rooms, setRooms] = useState(() => listRooms())
 
   // Old bookmarks /?invite=… must NOT open email form — stay in free mode
   const legacyInvite = params.get('invite')
@@ -35,6 +37,8 @@ const RoomManager = () => {
       clearTimeout(timer)
       socket.off('roomCreated', onCreated)
       socket.off('roomError', onError)
+      rememberRoom(roomId, { title: 'Комната' })
+      setRooms(listRooms())
       navigate(`/room/${roomId}`)
     }
     const onError = ({ message }) => {
@@ -64,21 +68,30 @@ const RoomManager = () => {
       return
     }
     rememberName()
+    rememberRoom(roomId, { title: 'Комната' })
+    setRooms(listRooms())
     navigate(`/room/${roomId}`)
+  }
+
+  const openRoom = (room) => {
+    rememberName()
+    navigate(`/room/${room.id}`)
   }
 
   return (
     <div className="landing">
       <div className="landing-card">
-        <p className="eyebrow">Как Google Meet · без почты</p>
-        <h1>Новая встреча</h1>
-        <p className="lead">
-          Нажмите кнопку → получите ссылку → отправьте кому угодно.
-          Кто откроет ссылку — сразу в комнате.
-        </p>
-        <p className="lead en">
-          One click → share the link → anyone joins. No email.
-        </p>
+        <p className="eyebrow">Семейные комнаты · Family rooms</p>
+        <h1>Чаты</h1>
+        <InstallHint />
+        <div className="room-list">
+          {rooms.map((room) => (
+            <button key={room.id} type="button" className="room-row" onClick={() => openRoom(room)}>
+              <strong>{room.family ? 'Семья' : room.title}</strong>
+              <span>{room.family ? 'Семейная комната · Family room' : 'Можно позвонить · Can call'}</span>
+            </button>
+          ))}
+        </div>
 
         {legacyInvite && (
           <p className="lead" style={{ color: '#0b57d0' }}>
@@ -118,8 +131,6 @@ const RoomManager = () => {
         </form>
 
         {error && <div className="error">{error}</div>}
-
-        <InstallHint />
 
         <p className="lead" style={{ marginTop: '1.5rem', fontSize: '0.85rem', opacity: 0.7 }}>
           Семейный чат с почтой (не для созвона): <Link to="/family">/family</Link>

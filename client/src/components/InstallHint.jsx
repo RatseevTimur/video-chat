@@ -1,12 +1,21 @@
 import { useEffect, useState } from 'react'
 import { BsPhone } from 'react-icons/bs'
 
-import { canPromptInstall, isIos, isStandalone, onInstallable, promptInstall } from '../utils/push'
+import {
+  beginPlaceIcon,
+  canPromptInstall,
+  enableAllRoomAlerts,
+  isIos,
+  isStandalone,
+  onInstallable
+} from '../utils/push'
+import { getStoredName } from '../utils/session'
 
 const InstallHint = ({ compact = false }) => {
   const [standalone, setStandalone] = useState(() => isStandalone())
   const [installable, setInstallable] = useState(() => canPromptInstall())
   const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
 
   useEffect(() => {
     const sync = () => {
@@ -22,54 +31,44 @@ const InstallHint = ({ compact = false }) => {
     }
   }, [])
 
-  const install = async () => {
+  if (standalone && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    return null
+  }
+
+  const place = async () => {
     setBusy(true)
+    setNote('')
+    const pending = beginPlaceIcon()
     try {
-      await promptInstall()
+      const [permission, installed] = await Promise.all([pending.permission, pending.installed])
+      if (permission === 'granted') {
+        const armed = await enableAllRoomAlerts(getStoredName() || 'Гость')
+        if (!armed.ok && armed.message) setNote(armed.message)
+      }
+      if (installed || isStandalone()) {
+        setStandalone(true)
+        setNote('Значок создан. Откройте его с экрана — звонки придут даже при блокировке. / Icon added. Open it from the home screen so calls arrive while the phone is locked.')
+        return
+      }
+      if (isIos()) {
+        setNote('iPhone не даёт сайту поставить значок сам. Нажмите Поделиться → На экран «Домой», затем откройте значок. / iPhone does not let a site place the icon. Tap Share → Add to Home Screen, then open the icon.')
+        return
+      }
+      if (!installable && !canPromptInstall()) {
+        setNote('Меню браузера → Добавить на главный экран. / Browser menu → Add to Home screen.')
+      }
     } finally {
       setBusy(false)
       setInstallable(canPromptInstall())
     }
   }
 
-  if (standalone) return null
-
-  if (compact) {
-    return (
-      <div className="install-note install-note-compact">
-        <p>
-          Чтобы звонок дошёл на заблокированный телефон, добавьте значок на экран «Домой» и нажмите «Включить звонки».
-          {' '}
-          Add the Home Screen icon, then tap Enable calls.
-        </p>
-        {installable && (
-          <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={install}>
-            <BsPhone /> На экран / Add
-          </button>
-        )}
-      </div>
-    )
-  }
-
   return (
-    <div className="install-note">
-      <p>
-        Чтобы вам можно было позвонить с заблокированного телефона, поставьте значок Video Chat на экран «Домой», откройте его и в комнате нажмите «Включить звонки».
-      </p>
-      <p>
-        To be rung on a locked phone, add the Video Chat icon to your Home Screen, open it, and tap Enable calls inside the room.
-      </p>
-      {installable ? (
-        <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={install}>
-          <BsPhone /> На экран / Add to Home Screen
-        </button>
-      ) : (
-        <p className="install-steps">
-          {isIos()
-            ? 'iPhone: Поделиться → На экран «Домой». / iPhone: Share → Add to Home Screen.'
-            : 'Меню браузера → Добавить на главный экран. / Browser menu → Add to Home screen.'}
-        </p>
-      )}
+    <div className={compact ? 'install-note install-note-compact' : 'install-note'}>
+      <button type="button" className="btn btn-success" disabled={busy} onClick={place}>
+        <BsPhone /> {busy ? '…' : (standalone ? 'Включить звонки / Enable calls' : 'Значок на экран / Add icon')}
+      </button>
+      {note && <p>{note}</p>}
     </div>
   )
 }

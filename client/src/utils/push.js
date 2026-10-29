@@ -1,3 +1,4 @@
+import { listRooms } from './rooms'
 import socket from './socket'
 import { randomId } from './session'
 
@@ -30,11 +31,21 @@ export function canPromptInstall() {
 
 export async function promptInstall() {
   if (!installPrompt) return false
-  installPrompt.prompt()
-  const choice = await installPrompt.userChoice.catch(() => ({ outcome: 'dismissed' }))
+  const pending = installPrompt
   installPrompt = null
   installListeners.forEach((fn) => fn())
+  pending.prompt()
+  const choice = await pending.userChoice.catch(() => ({ outcome: 'dismissed' }))
   return choice?.outcome === 'accepted'
+}
+
+/** Install dialog and notification permission must both start inside the same tap. */
+export function beginPlaceIcon() {
+  const permission = ('Notification' in window)
+    ? Notification.requestPermission().catch(() => 'denied')
+    : Promise.resolve('unsupported')
+  const installed = promptInstall()
+  return { permission, installed }
 }
 
 export function isIos() {
@@ -199,6 +210,16 @@ export async function disableCallAlerts(roomId) {
   } catch {
     // local flag is already off
   }
+}
+
+export async function enableAllRoomAlerts(name) {
+  const ids = listRooms().map((room) => room.id)
+  let last = { ok: true }
+  for (const roomId of ids) {
+    last = await enableCallAlerts(roomId, name)
+    if (!last.ok && last.reason !== 'failed') return last
+  }
+  return last.ok ? { ok: true, count: ids.length } : last
 }
 
 export async function resubscribeSaved(name) {

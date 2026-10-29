@@ -25,6 +25,7 @@ import {
   enableCallAlerts,
   getDeviceId
 } from '../utils/push'
+import { familyRoom, rememberRoom } from '../utils/rooms'
 import { getStoredId, getStoredName } from '../utils/session'
 import socket from '../utils/socket'
 import InCallChat from './InCallChat'
@@ -407,6 +408,16 @@ const Room = () => {
   useEffect(() => {
     setAlertsOn(alertsEnabled(roomId))
     setPinnedId(null)
+    const family = familyRoom()
+    rememberRoom(roomId, {
+      title: roomId === family.id ? 'Семья' : 'Комната',
+      family: roomId === family.id
+    })
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      enableCallAlerts(roomId, getStoredName() || 'Гость').then((result) => {
+        if (result?.ok) setAlertsOn(true)
+      })
+    }
   }, [roomId])
 
   const changeMask = async (id) => {
