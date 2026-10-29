@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 
 import { bindSocket, getChat, getSession, lookupUsers, notifyMembers, unbindSocket } from './messenger.js'
+import { sendRing } from './push.js'
 
 const users = {}
 const rooms = {}
@@ -77,7 +78,15 @@ function emptyRoom(type, hostId) {
     createdAt: Date.now(),
     call: { active: false, callerId: null, inCall: [] },
     chat: [],
-    chatExpiresAt: 0
+    chatExpiresAt: 0,
+    deviceIds: Object.create(null)
+  }
+}
+
+function rememberDevice(room, id, deviceId) {
+  if (!room.deviceIds) room.deviceIds = Object.create(null)
+  if (typeof deviceId === 'string' && /^[a-z0-9]{8,32}$/.test(deviceId)) {
+    room.deviceIds[id] = deviceId
   }
 }
 
@@ -102,6 +111,7 @@ function leaveRoom(socketState) {
   room.participants = room.participants.filter((userId) => userId !== id)
   room.call.inCall = room.call.inCall.filter((userId) => userId !== id)
   delete room.names[id]
+  if (room.deviceIds) delete room.deviceIds[id]
 
   if (wasWaiting && !wasParticipant) {
     notifyHostWaiting(currentRoom)
@@ -200,6 +210,7 @@ export default function initSocket(socket) {
       const room = emptyRoom(type, state.id)
       room.participants = [state.id]
       room.names[state.id] = sanitizeName(data.name) || state.id
+      rememberDevice(room, state.id, data.deviceId)
       rooms[roomId] = room
       state.currentRoom = roomId
       socket.join(roomId)
@@ -228,6 +239,7 @@ export default function initSocket(socket) {
       // Already inside → rejoin
       if (room.participants.includes(state.id)) {
         room.names[state.id] = name
+        rememberDevice(room, state.id, data.deviceId)
         room.emptyAt = 0
         state.currentRoom = roomId
         socket.join(roomId)
@@ -245,6 +257,7 @@ export default function initSocket(socket) {
         room.host = state.id
         room.participants = [state.id]
         room.names[state.id] = name
+        rememberDevice(room, state.id, data.deviceId)
         room.waiting = Object.create(null)
         room.emptyAt = 0
         state.currentRoom = roomId
@@ -265,6 +278,7 @@ export default function initSocket(socket) {
 
       room.participants.push(state.id)
       room.names[state.id] = name
+      rememberDevice(room, state.id, data.deviceId)
       room.emptyAt = 0
       state.currentRoom = roomId
       socket.join(roomId)
@@ -435,6 +449,52 @@ export default function initSocket(socket) {
       }
       pushMessage(room, message)
       emitToRoom(state.currentRoom, 'chatMessage', { message }, socket)
+    })
+    .on('watchRoom', (data = {}) => {
+      const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
+      if (!ROOM_RE.test(roomId)) return
+      socket.join(`watch:${roomId}`)
+    })
+    .on('unwatchRoom', (data = {}) => {
+      const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
+      if (!ROOM_RE.test(roomId)) return
+      socket.leave(`watch:${roomId}`)
+    })
+    .on('ringRoom', async (_data, ack) => {
+      const done = typeof ack === 'function' ? ack : () => {}
+      const room = rooms[state.currentRoom]
+      if (!room || !state.id) {
+        done({ sent: 0, total: 0 })
+        return
+      }
+      if (!rateLimit(limits, 'ring', 1, 10_000)) {
+        done({ sent: 0, total: 0, error: 'slow' })
+        return
+      }
+      const fromName = room.names[state.id] || 'Участник'
+      try {
+        const result = await sendRing(state.currentRoom, {
+          fromName,
+          skipDevices: Object.values(room.deviceIds || {})
+        })
+        socket.to(`watch:${state.currentRoom}`).emit('incomingRing', {
+          roomId: state.currentRoom,
+          fromName,
+          from: state.id
+        })
+        done(result)
+      } catch (error) {
+        console.error('ring failed', error)
+        done({ sent: 0, total: 0, error: 'failed' })
+      }
+    })
+    .on('ringDeclined', (data = {}) => {
+      const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
+      if (!ROOM_RE.test(roomId) || !rooms[roomId]) return
+      if (!rateLimit(limits, 'decline', 5, 10_000)) return
+      emitToRoom(roomId, 'ringDeclined', {
+        name: sanitizeName(data.name) || 'Участник'
+      })
     })
     .on('identify', ({ token } = {}) => {
       const session = getSession(token)

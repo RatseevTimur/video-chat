@@ -34,12 +34,17 @@
 }
 
 .landing {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 2rem 1rem;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+  padding: 1.2rem 1rem 2rem;
   background: radial-gradient(circle at top, #2b3344, #0f1115 55%);
 }
+
+.landing-card { margin-inline: auto; }
 
 .landing-card {
   width: min(680px, 100%);
@@ -126,6 +131,7 @@
   gap: 0.8rem;
   padding: 0.7rem 1rem;
   background: rgba(255,255,255,0.04);
+  flex-wrap: wrap;
 
   h1 { margin: 0; font-size: 1rem; }
   p { margin: 0.15rem 0 0; opacity: 0.65; font-size: 0.8rem; }
@@ -147,45 +153,122 @@
 .meet-stage {
   flex: 1 1 auto;
   display: flex;
-  min-height: 0;
+  min-height: 220px;
   gap: 0.45rem;
   padding: 0 0.55rem;
 }
+
+.install-note-compact p { margin: 0; }
+
+.meet-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.landing-card .install-note { margin: 1rem 0 0; }
+
+.install-note, .call-note {
+  margin: 0 0.7rem 0.45rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(138, 180, 248, 0.12);
+  color: #d2e3fc;
+  font-size: 0.82rem;
+
+  p { margin: 0 0 0.35rem; }
+  p:last-child { margin-bottom: 0; }
+}
+
+.install-steps { opacity: 0.85; }
 
 .meet-grid {
   flex: 1 1 auto;
   display: grid;
   gap: 0.45rem;
   min-height: 0;
+  height: 100%;
   background: #000;
   border-radius: 14px;
   padding: 0.45rem;
   overflow: hidden;
+  align-content: stretch;
+  justify-content: stretch;
 }
 
-.meet-grid.grid-1 { grid-template-columns: 1fr; }
-.meet-grid.grid-2 { grid-template-columns: 1fr 1fr; }
-.meet-grid.grid-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.meet-grid.grid-6 { grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; }
-.meet-grid.grid-9 { grid-template-columns: repeat(3, 1fr); }
-.meet-grid.grid-10 { grid-template-columns: repeat(4, 1fr); }
+.meet-grid.layout-equal {
+  grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows, 1), minmax(0, 1fr));
+}
+
+.meet-grid.layout-five {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+
+  .meet-tile:nth-child(-n + 3) { grid-column: span 2; }
+  .meet-tile:nth-child(n + 4) { grid-column: span 3; }
+}
+
+.meet-grid.layout-spotlight:not(.is-stacked) {
+  grid-template-columns: minmax(0, 2.35fr) minmax(0, 1fr);
+  grid-template-rows: repeat(var(--rail-rows, 2), minmax(0, 1fr));
+
+  .is-feature {
+    grid-column: 1;
+    grid-row: 1 / -1;
+  }
+}
+
+.meet-grid.layout-spotlight.feature-portrait:not(.is-stacked) {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+}
+
+.meet-grid.layout-spotlight.rails-2:not(.is-stacked) {
+  grid-template-columns: minmax(0, 2.35fr) minmax(0, 0.5fr) minmax(0, 0.5fr);
+}
+
+.meet-grid.layout-spotlight.rails-2.feature-portrait:not(.is-stacked) {
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.5fr) minmax(0, 0.5fr);
+}
+
+.meet-grid.layout-spotlight.rails-1:not(.is-stacked) .is-rail {
+  grid-column: 2;
+}
+
+.meet-grid.layout-spotlight.is-stacked {
+  grid-template-columns: repeat(var(--rail-cols, 2), minmax(0, 1fr));
+  grid-template-rows: minmax(0, 2.15fr) repeat(var(--rail-rows, 1), minmax(0, 1fr));
+
+  .is-feature {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+}
 
 .meet-tile {
   position: relative;
   min-height: 0;
+  min-width: 0;
   background: #1a1d24;
   border-radius: 14px;
   overflow: hidden;
+  touch-action: manipulation;
 
   &.is-off video { visibility: hidden; }
+  &.is-pressable { cursor: pointer; }
+  &.is-pinned { box-shadow: inset 0 0 0 3px #8ab4f8; }
+  &.is-pressable:focus-visible { box-shadow: inset 0 0 0 3px #8ab4f8; }
 
   video, .local-canvas, .meet-tile-empty {
     width: 100%;
     height: 100%;
     object-fit: cover;
     display: block;
+    background: #0b0d11;
   }
 
+  &.orient-portrait video { object-fit: contain; }
   video.mirror { transform: scaleX(-1); }
 }
 
@@ -468,7 +551,7 @@
   background: rgba(0,0,0,0.55);
   display: grid;
   place-items: center;
-  z-index: 20;
+  z-index: 40;
 }
 
 .incoming-card {
@@ -621,7 +704,16 @@
   .messenger { grid-template-columns: 1fr; }
   .meet-body, .text-room { grid-template-columns: 1fr; }
   .meet-header { flex-wrap: wrap; }
-  .meet-header h1 { flex: 1 1 180px; }
+  .meet-header > div { min-width: 0; flex: 1 1 160px; }
+  .meet-header p { display: none; }
+  .meet-header-actions .btn { position: relative; }
+  .meet-header-actions .btn-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
   .local-pane { width: 140px; }
   .meet-stage { position: relative; }
   .in-call-chat {
@@ -632,10 +724,5 @@
     flex: none;
     z-index: 5;
     box-shadow: -8px 0 24px rgba(0,0,0,0.35);
-  }
-  .meet-grid.grid-6,
-  .meet-grid.grid-9,
-  .meet-grid.grid-10 {
-    grid-template-columns: 1fr 1fr;
   }
 }

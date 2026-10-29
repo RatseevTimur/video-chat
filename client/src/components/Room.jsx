@@ -1,36 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  BsBell,
+  BsBellFill,
   BsCameraVideo,
   BsCameraVideoOff,
   BsChatDots,
   BsCheck,
   BsCopy,
   BsMicFill,
-  BsMicMuteFill
+  BsMicMuteFill,
+  BsTelephone
 } from 'react-icons/bs'
 import { MdFlipCameraIos } from 'react-icons/md'
 import { FiPhoneOff } from 'react-icons/fi'
 import { useNavigate, useParams } from 'react-router-dom'
 
+import { aspectOf, openCamera, videoConstraints } from '../utils/camera'
+import { planGrid, tileClass } from '../utils/gridLayout'
 import MaskEngine from '../utils/MaskEngine'
 import PeerConnection from '../utils/PeerConnection'
+import {
+  alertsEnabled,
+  disableCallAlerts,
+  enableCallAlerts,
+  getDeviceId
+} from '../utils/push'
 import { getStoredId, getStoredName } from '../utils/session'
 import socket from '../utils/socket'
 import InCallChat from './InCallChat'
+import InstallHint from './InstallHint'
 import MaskPicker from './MaskPicker'
 import PeerTile from './PeerTile'
 
 function shouldOffer(localId, remoteId) {
   return String(localId) < String(remoteId)
-}
-
-function gridClass(count) {
-  if (count <= 1) return 'grid-1'
-  if (count === 2) return 'grid-2'
-  if (count <= 4) return 'grid-4'
-  if (count <= 6) return 'grid-6'
-  if (count <= 9) return 'grid-9'
-  return 'grid-10'
 }
 
 function shouldRestart(pc) {
@@ -55,6 +58,12 @@ const Room = () => {
   const [messages, setMessages] = useState([])
   const [unread, setUnread] = useState(0)
   const [remoteStreams, setRemoteStreams] = useState({})
+  const [aspects, setAspects] = useState({})
+  const [pinnedId, setPinnedId] = useState(null)
+  const [stageBox, setStageBox] = useState({ w: 0, h: 0 })
+  const [alertsOn, setAlertsOn] = useState(() => alertsEnabled(roomId))
+  const [callNote, setCallNote] = useState('')
+  const [ringing, setRinging] = useState(false)
 
   const localVideo = useRef(null)
   const localCanvas = useRef(null)
@@ -71,6 +80,7 @@ const Room = () => {
   const chatOpenRef = useRef(false)
   const facingRef = useRef('user')
   const maskIdRef = useRef('none')
+  const gridRef = useRef(null)
 
   const displayName = useCallback((id) => roomInfoRef.current?.names?.[id] || id, [])
 
@@ -125,13 +135,34 @@ const Room = () => {
     })
   }, [])
 
+  const rememberAspect = useCallback((id, width, height) => {
+    const next = width === 'portrait' || width === 'landscape' ? width : aspectOf(width, height)
+    setAspects((prev) => (prev[id] === next ? prev : { ...prev, [id]: next }))
+  }, [])
+
   const bindComposer = useCallback(async (raw) => {
     if (!engineRef.current) engineRef.current = new MaskEngine()
     const engine = engineRef.current
+    engine.onSize = (w, h, stream) => {
+      rememberAspect('local', w, h)
+      const video = stream?.getVideoTracks?.()[0]
+      if (!video) return
+      const audio = rawStreamRef.current?.getAudioTracks() || []
+      const mixed = new MediaStream([video, ...audio])
+      const previous = outboundRef.current
+      outboundRef.current = mixed
+      attachLocalPreview(mixed)
+      pushVideoTrack(video)
+      previous?.getVideoTracks().forEach((track) => {
+        if (track !== video) track.stop()
+      })
+    }
     await engine.init()
     await engine.setMask(maskIdRef.current)
     if (localCanvas.current) engine.attach({ stream: raw, canvas: localCanvas.current })
     const canvasStream = engine.getStream(24)
+    const settings = raw.getVideoTracks()[0]?.getSettings?.() || {}
+    if (settings.width && settings.height) rememberAspect('local', settings.width, settings.height)
     const mixed = new MediaStream([
       ...(canvasStream?.getVideoTracks() || raw.getVideoTracks()),
       ...raw.getAudioTracks()
@@ -140,7 +171,7 @@ const Room = () => {
     attachLocalPreview(mixed)
     pushVideoTrack(mixed.getVideoTracks()[0])
     return mixed
-  }, [attachLocalPreview, pushVideoTrack])
+  }, [attachLocalPreview, pushVideoTrack, rememberAspect])
 
   const ensurePeer = useCallback(async (remoteId, { restart = false } = {}) => {
     const me = localIdRef.current
@@ -212,7 +243,7 @@ const Room = () => {
       setLocalId(id)
       localIdRef.current = id
       try { sessionStorage.setItem('vc-id', id) } catch { /* ignore */ }
-      socket.emit('joinRoom', { roomId, name: getStoredName() || 'Гость' })
+      socket.emit('joinRoom', { roomId, name: getStoredName() || 'Гость', deviceId: getDeviceId() })
     }
 
     socket
@@ -258,6 +289,9 @@ const Room = () => {
         ensurePeer(userId, { restart: Boolean(existing && !existing.pending && shouldRestart(existing)) })
       })
       .on('chatMessage', ({ message }) => addMessage(message))
+      .on('ringDeclined', ({ name }) => {
+        setCallNote(`${name || 'Участник'} отклонил звонок / declined`)
+      })
       .on('call', async (data) => {
         const from = data?.from
         if (!from || from === localIdRef.current) return
@@ -277,7 +311,7 @@ const Room = () => {
     return () => {
       closeAllPeers()
       socket.emit('leaveRoom')
-      ;['init', 'roomJoined', 'roomError', 'userJoined', 'userLeft', 'hostChanged', 'peerMediaReady', 'chatMessage', 'call']
+      ;['init', 'roomJoined', 'roomError', 'userJoined', 'userLeft', 'hostChanged', 'peerMediaReady', 'chatMessage', 'call', 'ringDeclined']
         .forEach((ev) => socket.off(ev))
       rawStreamRef.current?.getTracks().forEach((track) => track.stop())
       engineRef.current?.dispose()
@@ -290,15 +324,7 @@ const Room = () => {
 
     const startPreview = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-          video: {
-            facingMode: facingRef.current,
-            width: { ideal: 640, max: 1280 },
-            height: { ideal: 480, max: 720 },
-            frameRate: { ideal: 24, max: 30 }
-          }
-        })
+        const stream = await openCamera(facingRef.current)
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop())
           return
@@ -329,6 +355,60 @@ const Room = () => {
     if (mediaReady && roomInfo?.participants) meshWith(roomInfo.participants)
   }, [mediaReady, roomInfo?.participants, meshWith])
 
+  useEffect(() => {
+    const el = gridRef.current
+    if (!el) return undefined
+    const watch = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect
+      if (width && height) setStageBox({ w: width, h: height })
+    })
+    watch.observe(el)
+    return () => watch.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const el = localVideo.current
+    if (!el) return undefined
+    const report = () => {
+      if (el.videoWidth && el.videoHeight) rememberAspect('local', el.videoWidth, el.videoHeight)
+    }
+    el.addEventListener('loadedmetadata', report)
+    el.addEventListener('resize', report)
+    report()
+    return () => {
+      el.removeEventListener('loadedmetadata', report)
+      el.removeEventListener('resize', report)
+    }
+  }, [rememberAspect, mediaReady])
+
+  useEffect(() => {
+    if (!mediaReady) return undefined
+    let portrait = window.innerHeight > window.innerWidth
+    const onChange = async () => {
+      const next = window.innerHeight > window.innerWidth
+      if (next === portrait) return
+      portrait = next
+      const track = rawStreamRef.current?.getVideoTracks()?.[0]
+      if (!track) return
+      try {
+        await track.applyConstraints(videoConstraints(facingRef.current))
+      } catch (err) {
+        console.warn('orientation', err)
+      }
+    }
+    window.addEventListener('resize', onChange)
+    window.addEventListener('orientationchange', onChange)
+    return () => {
+      window.removeEventListener('resize', onChange)
+      window.removeEventListener('orientationchange', onChange)
+    }
+  }, [mediaReady])
+
+  useEffect(() => {
+    setAlertsOn(alertsEnabled(roomId))
+    setPinnedId(null)
+  }, [roomId])
+
   const changeMask = async (id) => {
     maskIdRef.current = id
     setMaskId(id)
@@ -339,11 +419,7 @@ const Room = () => {
     const next = facingRef.current === 'user' ? 'environment' : 'user'
     try {
       const fresh = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: next },
-          width: { ideal: 640, max: 1280 },
-          height: { ideal: 480, max: 720 }
-        }
+        video: videoConstraints(next)
       })
       const newVideo = fresh.getVideoTracks()[0]
       const raw = rawStreamRef.current
@@ -410,19 +486,99 @@ const Room = () => {
   }
 
   const others = (roomInfo?.participants || []).filter((id) => id !== localId)
-  const tileCount = 1 + others.length
+  const ids = ['local', ...others]
+  const layout = planGrid({
+    ids,
+    aspects,
+    pinnedId,
+    stageW: stageBox.w,
+    stageH: stageBox.h
+  })
+  const pressable = ids.length > 1
+
+  const togglePin = (id) => {
+    if (!pressable) return
+    setPinnedId((current) => (current === id ? null : id))
+  }
+
+  const toggleAlerts = async () => {
+    if (alertsOn) {
+      await disableCallAlerts(roomId)
+      setAlertsOn(false)
+      setCallNote('Звонки выключены / Calls off')
+      return
+    }
+    const result = await enableCallAlerts(roomId, getStoredName() || 'Гость')
+    if (result.ok) {
+      setAlertsOn(true)
+      setCallNote('Вам можно позвонить, даже если вы выйдете из комнаты / People can ring you after you leave')
+      return
+    }
+    setCallNote(result.message || 'Не удалось включить звонки / Could not enable calls')
+  }
+
+  const ringSubscribers = () => {
+    setRinging(true)
+    const timer = setTimeout(() => setRinging(false), 8000)
+    socket.emit('ringRoom', {}, (res) => {
+      clearTimeout(timer)
+      setRinging(false)
+      if (res?.error === 'slow') {
+        setCallNote('Подождите несколько секунд / Wait a few seconds')
+        return
+      }
+      if (!res?.total) {
+        setCallNote('Никто ещё не включил звонки. Отправьте ссылку и попросите нажать «Включить звонки». / Nobody has enabled calls yet. Share the link and ask them to tap Enable calls.')
+        return
+      }
+      if (!res.sent) {
+        setCallNote('Все, кто включил звонки, уже здесь / Everyone who enabled calls is already here')
+        return
+      }
+      setCallNote(`Звоним: ${res.sent} / Ringing ${res.sent}`)
+    })
+  }
+
+  const gridStyle = {
+    '--cols': layout.cols || 1,
+    '--rows': layout.rows || 1,
+    '--feature': layout.feature || 2,
+    '--rail': layout.rail || 1,
+    '--rail-cols': layout.railCols || 1,
+    '--rail-rows': layout.railRows || 1
+  }
+  const gridMode = [
+    'meet-grid',
+    layout.mode === 'spotlight' ? 'layout-spotlight' : '',
+    layout.mode === 'five' ? 'layout-five' : '',
+    layout.mode === 'equal' ? 'layout-equal' : '',
+    layout.stacked ? 'is-stacked' : '',
+    layout.mode === 'spotlight' && aspects[layout.featureId] === 'portrait' ? 'feature-portrait' : '',
+    layout.mode === 'spotlight' ? ((layout.railCols || 1) > 1 ? 'rails-2' : 'rails-1') : ''
+  ].filter(Boolean).join(' ')
 
   return (
     <div className={`meet-room ${chatOpen ? 'has-chat' : ''}`}>
       <header className="meet-header">
         <div>
           <h1>{roomInfo?.participantCount || 1} в встрече</h1>
-          <p>{copied ? 'Ссылка скопирована' : 'Отправьте ссылку — кто откроет, тот в эфире'}</p>
+          <p>{copied ? 'Ссылка скопирована' : 'Включите звонки — вам можно позвонить, даже если комната закрыта'}</p>
         </div>
-        <button type="button" className="btn btn-success" onClick={copyLink}>
-          {copied ? <BsCheck /> : <BsCopy />} {copied ? 'Готово' : 'Ссылка'}
-        </button>
+        <div className="meet-header-actions">
+          <button type="button" className={`btn btn-small ${alertsOn ? 'btn-success' : 'btn-outline'}`} onClick={toggleAlerts} aria-label={alertsOn ? 'Звонки включены' : 'Включить звонки'}>
+            {alertsOn ? <BsBellFill /> : <BsBell />} <span className="btn-label">{alertsOn ? 'Звонки вкл' : 'Включить звонки'}</span>
+          </button>
+          <button type="button" className="btn btn-primary btn-small" onClick={ringSubscribers} disabled={ringing} aria-label={ringing ? 'Звоним' : 'Позвонить'}>
+            <BsTelephone /> <span className="btn-label">{ringing ? 'Звоним…' : 'Позвонить'}</span>
+          </button>
+          <button type="button" className="btn btn-success btn-small" onClick={copyLink} aria-label={copied ? 'Ссылка скопирована' : 'Скопировать ссылку'}>
+            {copied ? <BsCheck /> : <BsCopy />} <span className="btn-label">{copied ? 'Готово' : 'Ссылка'}</span>
+          </button>
+        </div>
       </header>
+
+      <InstallHint compact />
+      {callNote && <div className="call-note">{callNote}</div>}
 
       {error && (
         <div className="error">
@@ -434,8 +590,28 @@ const Room = () => {
       )}
 
       <div className="meet-stage">
-        <section className={`meet-grid ${gridClass(Math.max(1, tileCount))}`}>
-          <div className={`meet-tile meet-tile-local ${videoOn ? '' : 'is-off'}`}>
+        <section ref={gridRef} className={gridMode} style={gridStyle}>
+          <div
+            className={`meet-tile-local ${tileClass({
+              off: !videoOn,
+              aspect: aspects.local,
+              pinned: layout.pinnedId === 'local',
+              feature: layout.featureId === 'local',
+              rail: layout.mode === 'spotlight' && layout.featureId !== 'local',
+              pressable
+            })}`}
+            onClick={pressable ? () => togglePin('local') : undefined}
+            onKeyDown={pressable ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                togglePin('local')
+              }
+            } : undefined}
+            role={pressable ? 'button' : undefined}
+            tabIndex={pressable ? 0 : undefined}
+            aria-pressed={pressable ? layout.pinnedId === 'local' : undefined}
+            title={pressable ? (layout.pinnedId === 'local' ? 'Убрать увеличение / Unpin' : 'Увеличить / Pin') : undefined}
+          >
             <video
               ref={localVideo}
               className={facing === 'user' ? 'mirror' : ''}
@@ -454,6 +630,13 @@ const Room = () => {
               stream={remoteStreams[id]}
               name={displayName(id)}
               videoOff={!remoteStreams[id]}
+              aspect={aspects[id] || 'landscape'}
+              pinned={layout.pinnedId === id}
+              feature={layout.featureId === id}
+              rail={layout.mode === 'spotlight' && layout.featureId !== id}
+              pressable={pressable}
+              onClick={() => togglePin(id)}
+              onAspect={(value) => rememberAspect(id, value)}
             />
           ))}
         </section>

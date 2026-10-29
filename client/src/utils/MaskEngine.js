@@ -6,8 +6,15 @@ const WASM_URL = '/mediapipe/wasm'
 const MODEL_URL = '/models/blaze_face_short_range.tflite'
 const DETECT_WIDTH = 320
 const SMOOTH = 0.28
-const OUT_W = 640
-const OUT_H = 480
+const OUT_LONG = 960
+
+function fitSize(srcW, srcH) {
+  const scale = Math.min(1, OUT_LONG / Math.max(srcW, srcH))
+  return {
+    w: Math.max(2, Math.round((srcW * scale) / 2) * 2),
+    h: Math.max(2, Math.round((srcH * scale) / 2) * 2)
+  }
+}
 
 const emptyPose = () => ({
   x: 0.5,
@@ -54,6 +61,8 @@ export default class MaskEngine {
     this.detectCtx = this.detectCanvas.getContext('2d', { alpha: false })
     this.outputStream = null
     this.crop = { x: 0, y: 0, w: 1, h: 1 }
+    this.fps = 24
+    this.onSize = null
   }
 
   async init() {
@@ -100,6 +109,12 @@ export default class MaskEngine {
 
     this.canvas = canvas
     this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true })
+    const settings = stream.getVideoTracks()[0]?.getSettings?.() || {}
+    if (settings.width && settings.height) {
+      const size = fitSize(settings.width, settings.height)
+      canvas.width = size.w
+      canvas.height = size.h
+    }
     this.video.srcObject = stream
     const play = this.video.play()
     if (play) play.catch(() => {})
@@ -111,6 +126,7 @@ export default class MaskEngine {
 
   getStream(fps = 24) {
     if (!this.canvas) return null
+    this.fps = fps
     if (!this.outputStream) {
       this.outputStream = this.canvas.captureStream(fps)
     }
@@ -152,9 +168,19 @@ export default class MaskEngine {
     const height = video.videoHeight
     if (!width || !height) return
 
-    if (canvas.width !== OUT_W || canvas.height !== OUT_H) {
-      canvas.width = OUT_W
-      canvas.height = OUT_H
+    const size = fitSize(width, height)
+    if (canvas.width !== size.w || canvas.height !== size.h) {
+      canvas.width = size.w
+      canvas.height = size.h
+      if (this.outputStream) {
+        const next = canvas.captureStream(this.fps || 24)
+        const prev = this.outputStream
+        this.outputStream = next
+        this.onSize?.(size.w, size.h, next)
+        if (prev !== next) prev.getVideoTracks().forEach((track) => track.stop())
+      } else {
+        this.onSize?.(size.w, size.h, null)
+      }
     }
 
     if (video.currentTime !== this.lastVideoTime) {
@@ -173,19 +199,19 @@ export default class MaskEngine {
 
     const faceX = this.pose.visible > 0.2 ? this.pose.x : 0.5
     const faceY = this.pose.visible > 0.2 ? this.pose.y : 0.38
-    const crop = coverCrop(width, height, OUT_W, OUT_H, faceX, faceY)
+    const crop = coverCrop(width, height, canvas.width, canvas.height, faceX, faceY)
     this.crop = crop
 
-    ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, OUT_W, OUT_H)
+    ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, canvas.width, canvas.height)
 
     if (this.mask.id === 'none' || !this.maskImage || this.pose.visible < 0.12) return
 
     const img = this.maskImage
-    const maskWidth = (this.pose.scale * width) * (OUT_W / crop.w)
+    const maskWidth = (this.pose.scale * width) * (canvas.width / crop.w)
     const ratio = (img.height || img.naturalHeight) / (img.width || img.naturalWidth || 1)
     const maskHeight = maskWidth * ratio
-    const mx = ((this.pose.x * width) - crop.x) / crop.w * OUT_W
-    const my = ((this.pose.y * height) - crop.y) / crop.h * OUT_H
+    const mx = ((this.pose.x * width) - crop.x) / crop.w * canvas.width
+    const my = ((this.pose.y * height) - crop.y) / crop.h * canvas.height
 
     ctx.save()
     ctx.globalAlpha = Math.min(1, this.pose.visible)

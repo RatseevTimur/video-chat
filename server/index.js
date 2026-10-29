@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 
 import { attachApi } from './utils/api.js'
 import initSocket from './utils/initSocket.js'
+import { attachPush } from './utils/push.js'
 import { getPort, printBanner } from './utils/messenger.js'
 import { ensureTls } from './utils/tls.js'
 
@@ -30,6 +31,7 @@ app.use((req, res, next) => {
 })
 app.use(express.json({ limit: '256kb' }))
 attachApi(app)
+attachPush(app)
 
 app.get('/api/ice', (_req, res) => {
   res.json({
@@ -45,7 +47,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use(express.static(join(__dirname, '../client/dist'), {
   setHeaders(res, filePath) {
-    if (filePath.endsWith('.html')) {
+    if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('.webmanifest')) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     } else if (/\.[a-f0-9]{8}\.(js|css)$/i.test(filePath) || filePath.includes('/assets/')) {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')

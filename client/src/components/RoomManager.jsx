@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
+import InstallHint from './InstallHint'
 
 /** Google Meet–style: name + one click → shareable room link. No email. */
 const RoomManager = () => {
@@ -117,6 +118,8 @@ const RoomManager = () => {
         </form>
 
         {error && <div className="error">{error}</div>}
+
+        <InstallHint />
 
         <p className="lead" style={{ marginTop: '1.5rem', fontSize: '0.85rem', opacity: 0.7 }}>
           Семейный чат с почтой (не для созвона): <Link to="/family">/family</Link>
