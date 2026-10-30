@@ -9,7 +9,7 @@ import { forgetRoom, listRooms, rememberRoom } from '../utils/rooms'
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
 import { allUnread, clearUnread, getUnread } from '../utils/unread'
-import AppDownload from './AppDownload'
+import AppSettings from './AppSettings'
 
 /** Google Meet–style: name + one click → shareable room link. No email. */
 const RoomManager = () => {
@@ -131,8 +131,10 @@ const RoomManager = () => {
   return (
     <div className="landing">
       <div className="landing-card">
-        <h1>Чаты</h1>
-        <AppDownload />
+        <div className="landing-top">
+          <h1>Чаты</h1>
+          <AppSettings />
+        </div>
         <div className="room-list">
           {rooms.map((room) => {
             const unread = Number(unreadMap[room.id] || getUnread(room.id) || 0)

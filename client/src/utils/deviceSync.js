@@ -1,3 +1,4 @@
+import { apiUrl } from './apiOrigin'
 import { getDeviceId } from './push'
 import { listRooms, rememberRoom } from './rooms'
 import { getStoredName, setStoredName } from './session'
@@ -11,7 +12,7 @@ export async function pushDeviceRooms(name = getStoredName()) {
     family: Boolean(room.family)
   }))
   try {
-    const res = await fetch('/api/device/sync', {
+    const res = await fetch(apiUrl('/api/device/sync'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId, name: name || '', rooms })
@@ -27,7 +28,7 @@ export async function pushDeviceRooms(name = getStoredName()) {
 export async function pullDeviceRooms() {
   const deviceId = getDeviceId()
   try {
-    const res = await fetch(`/api/device/rooms?deviceId=${encodeURIComponent(deviceId)}`)
+    const res = await fetch(apiUrl(`/api/device/rooms?deviceId=${encodeURIComponent(deviceId)}`))
     if (!res.ok) return listRooms()
     const data = await res.json()
     if (data?.name) setStoredName(data.name)
@@ -48,7 +49,7 @@ export async function syncDeviceNow(name) {
 export async function removeRemoteRoom(roomId) {
   const deviceId = getDeviceId()
   try {
-    await fetch('/api/device/room/remove', {
+    await fetch(apiUrl('/api/device/room/remove'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId, roomId })
@@ -67,7 +68,7 @@ export async function replaceDeviceRooms(name = getStoredName()) {
     family: Boolean(room.family)
   }))
   try {
-    const res = await fetch('/api/device/rooms/set', {
+    const res = await fetch(apiUrl('/api/device/rooms/set'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId, name: name || '', rooms })

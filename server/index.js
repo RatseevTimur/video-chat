@@ -26,7 +26,18 @@ app.disable('x-powered-by')
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'no-referrer')
-  res.setHeader('X-Frame-Options', 'DENY')
+  // Capacitor Android embeds UI at https://localhost and calls this API cross-origin.
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+  if (req.method === 'OPTIONS') {
+    res.status(204).end()
+    return
+  }
+  // Allow Capacitor WebView to embed only same-app flows; APIs stay frame-deny.
+  if (!req.path.startsWith('/api') && !req.path.startsWith('/socket.io')) {
+    res.setHeader('X-Frame-Options', 'DENY')
+  }
   next()
 })
 app.use(express.json({ limit: '256kb' }))

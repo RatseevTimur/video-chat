@@ -1,3 +1,5 @@
+import { apiUrl } from './apiOrigin'
+
 const FALLBACK = [
   { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }
 ]
@@ -8,7 +10,7 @@ let cachedAt = 0
 export async function getIceServers() {
   if (cached && Date.now() - cachedAt < 60_000) return cached
   try {
-    const response = await fetch('/api/ice', { cache: 'no-store' })
+    const response = await fetch(apiUrl('/api/ice'), { cache: 'no-store' })
     if (!response.ok) throw new Error('ice')
     const data = await response.json()
     cached = Array.isArray(data.iceServers) && data.iceServers.length ? data.iceServers : FALLBACK

@@ -171,6 +171,98 @@
 
 .landing-card .install-note { margin: 1rem 0 0; }
 
+.landing-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+
+  h1 { margin: 0; }
+}
+
+.settings-gear {
+  flex: 0 0 auto;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+
+  @media (min-width: 560px) {
+    align-items: center;
+  }
+}
+
+.settings-panel {
+  width: min(100%, 22rem);
+  max-height: min(88dvh, 36rem);
+  overflow: auto;
+  padding: 1rem 1.05rem 1.15rem;
+  border-radius: 16px 16px 12px 12px;
+  background: #171b24;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #e8eaed;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+
+  strong { font-size: 1.05rem; }
+}
+
+.settings-mode {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+
+  .btn { align-self: stretch; justify-content: center; }
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  opacity: 0.75;
+}
+
+.settings-sound {
+  margin-top: 0.25rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.82rem;
+  line-height: 1.4;
+
+  strong { display: block; margin-bottom: 0.35rem; }
+  ol { margin: 0 0 0.45rem; padding-left: 1.1rem; }
+  p { margin: 0; opacity: 0.8; }
+}
+
 .app-download {
   display: flex;
   flex-direction: column;

@@ -1,3 +1,4 @@
+import { apiUrl } from './apiOrigin'
 import { listRooms } from './rooms'
 import socket from './socket'
 import { randomId } from './session'
@@ -195,7 +196,7 @@ function sameKey(existing, key) {
 }
 
 async function publicKey() {
-  const res = await fetch('/api/push/public-key')
+  const res = await fetch(apiUrl('/api/push/public-key'))
   if (!res.ok) throw new Error('push-key')
   const data = await res.json()
   if (!data?.publicKey) throw new Error('push-key')
@@ -301,7 +302,7 @@ export async function enableCallAlerts(roomId, name) {
 
   try {
     const subscription = await pushSubscription()
-    const res = await fetch('/api/push/subscribe', {
+    const res = await fetch(apiUrl('/api/push/subscribe'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -342,7 +343,7 @@ export async function disableCallAlerts(roomId) {
     const reg = await navigator.serviceWorker.getRegistration()
     const subscription = await reg?.pushManager?.getSubscription()
     if (!subscription) return
-    await fetch('/api/push/unsubscribe', {
+    await fetch(apiUrl('/api/push/unsubscribe'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ roomId, endpoint: subscription.endpoint })
@@ -389,7 +390,7 @@ export async function resubscribeSaved(name) {
   if (!ids.length) return
   try {
     const subscription = await pushSubscription()
-    await Promise.all(ids.map((roomId) => fetch('/api/push/subscribe', {
+    await Promise.all(ids.map((roomId) => fetch(apiUrl('/api/push/subscribe'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

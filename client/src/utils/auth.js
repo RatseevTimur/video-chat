@@ -1,3 +1,5 @@
+import { apiUrl } from './apiOrigin'
+
 const SESSION = 'vc-session'
 
 export function getSession() {
@@ -22,7 +24,7 @@ export function authHeaders() {
 }
 
 export async function api(path, options = {}) {
-  const response = await fetch(path, {
+  const response = await fetch(apiUrl(path), {
     ...options,
     headers: {
       'Content-Type': 'application/json',
