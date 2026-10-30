@@ -46,7 +46,7 @@ const InstallHint = ({ compact = false, floating = false }) => {
       setStandalone(isStandalone())
       setInstallable(canPromptInstall())
       if (result.ok) {
-        setNote('Звонки включены')
+        setNote(result.hint || 'Звонки включены — проверьте звук тестового уведомления')
         setHidden(true)
         return
       }

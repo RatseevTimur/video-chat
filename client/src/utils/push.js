@@ -155,6 +155,35 @@ function fail(reason, message) {
   return { ok: false, reason, message }
 }
 
+/** Fires a real OS notice so the user can turn on sound/vibrate in system settings. */
+export async function probeCallAlert() {
+  if (!pushSupported() || !window.isSecureContext) return
+  if (Notification.permission !== 'granted') return
+  try {
+    const reg = await navigator.serviceWorker.ready
+    await reg.showNotification('Проверка звонка', {
+      body: 'Должны быть звук и вибрация. Если тихо — откройте настройки уведомлений приложения и включите «Оповещение».',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: `vc-probe-${Date.now()}`,
+      renotify: true,
+      requireInteraction: false,
+      silent: false,
+      vibrate: [700, 160, 700, 160, 900],
+      timestamp: Date.now()
+    })
+  } catch {
+    // ignore
+  }
+}
+
+export function callSoundHint() {
+  if (isIos()) {
+    return 'iPhone: звук пуша = системный. Беззвучный режим глушит и звук, и часто вибрацию.'
+  }
+  return 'Android: Долгое нажатие на уведомление → Настройки → режим «Оповещение» + звук и вибрация. Chrome → Настройки → Уведомления → Web Apps → Вибрация.'
+}
+
 export async function enableCallAlerts(roomId, name) {
   if (!window.isSecureContext) {
     return fail(
@@ -208,7 +237,8 @@ export async function enableCallAlerts(roomId, name) {
     rooms[roomId] = { on: true, name: name || '' }
     writeRooms(rooms)
     socket.emit('watchRoom', { roomId, deviceId: getDeviceId() })
-    return { ok: true }
+    probeCallAlert().catch(() => {})
+    return { ok: true, hint: callSoundHint() }
   } catch (error) {
     const detail = String(error?.message || error || '')
     if (detail.includes('push-key')) {
@@ -264,7 +294,9 @@ export async function armCallsFromGesture(name) {
     }
     return fail('denied', 'Нужны уведомления для звонка. / Notifications are required for calls.')
   }
-  return enableAllRoomAlerts(name)
+  const armed = await enableAllRoomAlerts(name)
+  if (armed.ok) return { ok: true, hint: callSoundHint() }
+  return armed
 }
 
 export async function resubscribeSaved(name) {

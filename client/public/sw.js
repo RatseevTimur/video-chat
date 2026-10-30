@@ -1,12 +1,54 @@
-/* Push-only worker: rings subscribers even when the site is closed. No asset cache. */
+/* Push-only worker: rings even when the site is closed. No asset cache. */
 
 const rings = new Map()
-const VIBRATE = [560, 140, 560, 140, 800]
+const VIBRATE = [800, 200, 800, 200, 800, 200, 1200]
 
 function stopRing(roomId) {
   const token = rings.get(roomId)
   if (token) token.stop = true
   rings.delete(roomId)
+}
+
+async function closeTagged(roomId) {
+  const list = await self.registration.getNotifications()
+  list.forEach((note) => {
+    if (note.data?.roomId === roomId || String(note.tag || '').startsWith(`call-${roomId}`)) {
+      note.close()
+    }
+  })
+}
+
+async function showCallNotice(payload, pulse) {
+  const tag = `call-${payload.roomId}-${pulse}`
+  const options = {
+    body: payload.body,
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag,
+    renotify: true,
+    requireInteraction: true,
+    silent: false,
+    vibrate: VIBRATE,
+    timestamp: Date.now(),
+    data: { url: payload.url, roomId: payload.roomId, pulse },
+    actions: [
+      { action: 'accept', title: 'Ответить' },
+      { action: 'decline', title: 'Отклонить' }
+    ]
+  }
+
+  // Newer Chromium: call-style notice with system ringtone (ignored if unsupported).
+  try {
+    await self.registration.showNotification(payload.title, {
+      ...options,
+      scenario: 'incoming-call'
+    })
+    return
+  } catch {
+    // fall through
+  }
+
+  await self.registration.showNotification(payload.title, options)
 }
 
 self.addEventListener('push', (event) => {
@@ -24,41 +66,36 @@ self.addEventListener('push', (event) => {
       fromName: data.fromName || '',
       url: data.url || '/',
       title: data.title || 'Входящий звонок',
-      body: data.body || ''
+      body: data.body || 'Откройте, чтобы ответить'
     }
 
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     windows.forEach((client) => client.postMessage(payload))
     const visible = windows.some((client) => client.visibilityState === 'visible')
+    // Foreground page plays its own ringtone + vibrate.
     if (visible) return
 
+    const roomId = payload.roomId || 'call'
     const token = { stop: false }
-    if (payload.roomId) rings.set(payload.roomId, token)
-    for (let i = 0; i < 12 && !token.stop; i += 1) {
-      await self.registration.showNotification(payload.title, {
-        body: payload.body,
-        icon: '/icons/icon-192.png',
-        badge: '/icons/icon-192.png',
-        tag: data.tag || `call-${payload.roomId}`,
-        renotify: true,
-        requireInteraction: true,
-        silent: false,
-        vibrate: VIBRATE,
-        data: { url: payload.url, roomId: payload.roomId },
-        actions: [
-          { action: 'accept', title: 'Войти' },
-          { action: 'decline', title: 'Отклонить' }
-        ]
-      })
-      if (i < 11 && !token.stop) await new Promise((resolve) => setTimeout(resolve, 1500))
+    rings.set(roomId, token)
+
+    // Pulse with a NEW tag each time so Android re-alerts (same tag often stays silent).
+    for (let i = 0; i < 10 && !token.stop; i += 1) {
+      await closeTagged(roomId)
+      await showCallNotice(payload, i)
+      if (i < 9 && !token.stop) {
+        await new Promise((resolve) => setTimeout(resolve, 1800))
+      }
     }
-    if (payload.roomId) rings.delete(payload.roomId)
+    rings.delete(roomId)
   })())
 })
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  stopRing(event.notification.data?.roomId || '')
+  const roomId = event.notification.data?.roomId || ''
+  stopRing(roomId)
+  closeTagged(roomId)
   if (event.action === 'decline') return
   const url = new URL(event.notification.data?.url || '/', self.location.origin).href
 
@@ -76,5 +113,5 @@ self.addEventListener('notificationclick', (event) => {
 })
 
 self.addEventListener('notificationclose', () => {
-  // Replacing the same tag also closes the previous notice. The ring loop owns the stop.
+  // Closing the previous pulse also fires this. The ring loop / click handler owns stop.
 })

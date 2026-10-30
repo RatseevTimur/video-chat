@@ -529,7 +529,7 @@ const Room = () => {
     const result = await armCallsFromGesture(getStoredName() || 'Гость')
     if (result.ok) {
       setAlertsOn(true)
-      flashNote('Звонки вкл')
+      flashNote(result.hint || 'Звонки вкл — проверьте звук уведомления')
       return
     }
     flashNote(result.message || 'Не удалось включить звонки')

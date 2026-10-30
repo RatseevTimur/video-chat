@@ -64,7 +64,19 @@ export default function App() {
       })
       ringtoneRef.current?.stop()
       ringtoneRef.current = createRingtone()
-      ringtoneRef.current.start()
+      // Page audio/vibrate only work while visible; OS push handles the locked/minimized case.
+      if (document.visibilityState === 'visible') {
+        ringtoneRef.current.start()
+        startVibrate()
+      }
+    }
+
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (!ringtoneRef.current && !lastRingRef.current.roomId) return
+      // Only resume while a recent ring is still relevant.
+      if (Date.now() - lastRingRef.current.at > 20000) return
+      ringtoneRef.current?.resumeIfVisible?.()
       startVibrate()
     }
 
@@ -80,9 +92,11 @@ export default function App() {
     }
 
     socket.on('incomingRing', showRing)
+    document.addEventListener('visibilitychange', onVisible)
     navigator.serviceWorker?.addEventListener('message', onServiceMessage)
     return () => {
       socket.off('incomingRing', showRing)
+      document.removeEventListener('visibilitychange', onVisible)
       navigator.serviceWorker?.removeEventListener('message', onServiceMessage)
     }
   }, [navigate])
