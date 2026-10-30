@@ -35,9 +35,13 @@ export default function App() {
     const joinWatch = () => watchSavedRooms()
     if (socket.connected) joinWatch()
     socket.on('connect', joinWatch)
-    resubscribeSaved(getStoredName())
+    resubscribeSaved(getStoredName() || 'Гость')
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {})
+    }
+    // Re-arm watchers after SW is ready (covers Render restarts / new VAPID keys)
+    if (navigator.serviceWorker?.ready) {
+      navigator.serviceWorker.ready.then(() => resubscribeSaved(getStoredName() || 'Гость')).catch(() => {})
     }
     return () => {
       socket.off('connect', joinWatch)

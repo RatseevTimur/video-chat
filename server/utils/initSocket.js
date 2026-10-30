@@ -83,10 +83,11 @@ function emptyRoom(type, hostId) {
   }
 }
 
-function rememberDevice(room, id, deviceId) {
+function rememberDevice(room, id, deviceId, socket) {
   if (!room.deviceIds) room.deviceIds = Object.create(null)
   if (typeof deviceId === 'string' && /^[a-z0-9]{8,32}$/.test(deviceId)) {
     room.deviceIds[id] = deviceId
+    if (socket) socket.data.deviceId = deviceId
   }
 }
 
@@ -210,7 +211,7 @@ export default function initSocket(socket) {
       const room = emptyRoom(type, state.id)
       room.participants = [state.id]
       room.names[state.id] = sanitizeName(data.name) || state.id
-      rememberDevice(room, state.id, data.deviceId)
+      rememberDevice(room, state.id, data.deviceId, socket)
       rooms[roomId] = room
       state.currentRoom = roomId
       socket.join(roomId)
@@ -239,7 +240,7 @@ export default function initSocket(socket) {
       // Already inside → rejoin
       if (room.participants.includes(state.id)) {
         room.names[state.id] = name
-        rememberDevice(room, state.id, data.deviceId)
+        rememberDevice(room, state.id, data.deviceId, socket)
         room.emptyAt = 0
         state.currentRoom = roomId
         socket.join(roomId)
@@ -257,7 +258,7 @@ export default function initSocket(socket) {
         room.host = state.id
         room.participants = [state.id]
         room.names[state.id] = name
-        rememberDevice(room, state.id, data.deviceId)
+        rememberDevice(room, state.id, data.deviceId, socket)
         room.waiting = Object.create(null)
         room.emptyAt = 0
         state.currentRoom = roomId
@@ -278,7 +279,7 @@ export default function initSocket(socket) {
 
       room.participants.push(state.id)
       room.names[state.id] = name
-      rememberDevice(room, state.id, data.deviceId)
+      rememberDevice(room, state.id, data.deviceId, socket)
       room.emptyAt = 0
       state.currentRoom = roomId
       socket.join(roomId)
@@ -453,11 +454,18 @@ export default function initSocket(socket) {
     .on('watchRoom', (data = {}) => {
       const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
       if (!ROOM_RE.test(roomId)) return
+      const deviceId = typeof data.deviceId === 'string' ? data.deviceId.trim() : ''
+      if (/^[a-z0-9]{8,32}$/.test(deviceId)) {
+        state.deviceId = deviceId
+        socket.data.deviceId = deviceId
+      }
+      socket.data.watching = roomId
       socket.join(`watch:${roomId}`)
     })
     .on('unwatchRoom', (data = {}) => {
       const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
       if (!ROOM_RE.test(roomId)) return
+      if (socket.data.watching === roomId) socket.data.watching = null
       socket.leave(`watch:${roomId}`)
     })
     .on('ringRoom', async (_data, ack) => {
@@ -471,18 +479,34 @@ export default function initSocket(socket) {
         done({ sent: 0, total: 0, error: 'slow' })
         return
       }
+      const roomId = state.currentRoom
       const fromName = room.names[state.id] || 'Участник'
+      const inRoomDevices = new Set(Object.values(room.deviceIds || {}).filter(Boolean))
       try {
-        const result = await sendRing(state.currentRoom, {
+        const watchers = await socket.server.in(`watch:${roomId}`).fetchSockets()
+        const online = watchers.filter((peer) => {
+          if (peer.id === socket.id) return false
+          if (peer.rooms.has(roomId)) return false
+          const deviceId = peer.data?.deviceId
+          if (deviceId && inRoomDevices.has(deviceId)) return false
+          return true
+        }).length
+
+        const result = await sendRing(roomId, {
           fromName,
-          skipDevices: Object.values(room.deviceIds || {})
+          skipDevices: [...inRoomDevices]
         })
-        socket.to(`watch:${state.currentRoom}`).emit('incomingRing', {
-          roomId: state.currentRoom,
+        socket.to(`watch:${roomId}`).emit('incomingRing', {
+          roomId,
           fromName,
           from: state.id
         })
-        done(result)
+        done({
+          sent: Math.max(result.sent || 0, online),
+          total: Math.max(result.total || 0, online),
+          pushed: result.sent || 0,
+          online
+        })
       } catch (error) {
         console.error('ring failed', error)
         done({ sent: 0, total: 0, error: 'failed' })

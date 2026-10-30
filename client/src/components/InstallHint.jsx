@@ -2,20 +2,20 @@ import { useEffect, useState } from 'react'
 import { BsPhone } from 'react-icons/bs'
 
 import {
-  beginPlaceIcon,
+  armCallsFromGesture,
   canPromptInstall,
-  enableAllRoomAlerts,
   isIos,
   isStandalone,
   onInstallable
 } from '../utils/push'
 import { getStoredName } from '../utils/session'
 
-const InstallHint = ({ compact = false }) => {
+const InstallHint = ({ compact = false, floating = false }) => {
   const [standalone, setStandalone] = useState(() => isStandalone())
   const [installable, setInstallable] = useState(() => canPromptInstall())
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const [hidden, setHidden] = useState(false)
 
   useEffect(() => {
     const sync = () => {
@@ -31,42 +31,52 @@ const InstallHint = ({ compact = false }) => {
     }
   }, [])
 
-  if (standalone && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-    return null
+  const armed = typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  if (hidden || (standalone && armed) || (armed && !installable && !isIos())) {
+    return note ? (
+      <div className={`toast-note ${floating ? 'toast-note-float' : ''}`}>{note}</div>
+    ) : null
   }
 
   const place = async () => {
     setBusy(true)
     setNote('')
-    const pending = beginPlaceIcon()
     try {
-      const [permission, installed] = await Promise.all([pending.permission, pending.installed])
-      if (permission === 'granted') {
-        const armed = await enableAllRoomAlerts(getStoredName() || 'Гость')
-        if (!armed.ok && armed.message) setNote(armed.message)
-      }
-      if (installed || isStandalone()) {
-        setStandalone(true)
-        setNote('Значок создан. Откройте его с экрана — звонки придут даже при блокировке. / Icon added. Open it from the home screen so calls arrive while the phone is locked.')
+      const result = await armCallsFromGesture(getStoredName() || 'Гость')
+      setStandalone(isStandalone())
+      setInstallable(canPromptInstall())
+      if (result.ok) {
+        setNote('Звонки включены')
+        setHidden(true)
         return
       }
-      if (isIos()) {
-        setNote('iPhone не даёт сайту поставить значок сам. Нажмите Поделиться → На экран «Домой», затем откройте значок. / iPhone does not let a site place the icon. Tap Share → Add to Home Screen, then open the icon.')
+      if (result.reason === 'ios-install' || (isIos() && !isStandalone())) {
+        setNote('Поделиться → На экран «Домой»')
         return
       }
-      if (!installable && !canPromptInstall()) {
-        setNote('Меню браузера → Добавить на главный экран. / Browser menu → Add to Home screen.')
+      if (!canPromptInstall() && !isStandalone()) {
+        setNote('Меню браузера → На экран')
+        return
       }
+      if (result.message) setNote(result.message)
     } finally {
       setBusy(false)
-      setInstallable(canPromptInstall())
     }
   }
 
+  const label = busy
+    ? '…'
+    : (standalone || armed)
+      ? 'Включить звонки'
+      : (installable ? 'Установить и звонки' : 'Значок + звонки')
+
   return (
-    <div className={compact ? 'install-note install-note-compact' : 'install-note'}>
-      <button type="button" className="btn btn-success" disabled={busy} onClick={place}>
-        <BsPhone /> {busy ? '…' : (standalone ? 'Включить звонки / Enable calls' : 'Значок на экран / Add icon')}
+    <div className={[
+      floating ? 'toast-note toast-note-float' : (compact ? 'install-note install-note-compact' : 'install-note'),
+      floating ? 'install-float' : ''
+    ].filter(Boolean).join(' ')}>
+      <button type="button" className="btn btn-success btn-small" disabled={busy} onClick={place}>
+        <BsPhone /> {label}
       </button>
       {note && <p>{note}</p>}
     </div>

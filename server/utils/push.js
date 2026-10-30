@@ -18,6 +18,14 @@ function ensureDir() {
 
 function loadKeys() {
   if (keys) return keys
+  const fromEnv = {
+    publicKey: process.env.VAPID_PUBLIC_KEY || '',
+    privateKey: process.env.VAPID_PRIVATE_KEY || ''
+  }
+  if (fromEnv.publicKey && fromEnv.privateKey) {
+    keys = fromEnv
+    return keys
+  }
   ensureDir()
   if (existsSync(vapidPath)) {
     keys = JSON.parse(readFileSync(vapidPath, 'utf8'))

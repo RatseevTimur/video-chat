@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { BsCameraVideo, BsLink45Deg } from 'react-icons/bs'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import { armCallsFromGesture, getDeviceId } from '../utils/push'
 import { listRooms, rememberRoom } from '../utils/rooms'
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
@@ -21,8 +22,13 @@ const RoomManager = () => {
 
   const rememberName = () => setStoredName(name.trim() || 'Гость')
 
+  const armQuietly = () => {
+    armCallsFromGesture(name.trim() || 'Гость').catch(() => {})
+  }
+
   const startMeeting = () => {
     rememberName()
+    armQuietly()
     setBusy(true)
     setError('')
 
@@ -51,7 +57,11 @@ const RoomManager = () => {
 
     socket.once('roomCreated', onCreated)
     socket.once('roomError', onError)
-    const emit = () => socket.emit('createRoom', { type: 'video', name: name.trim() || 'Гость' })
+    const emit = () => socket.emit('createRoom', {
+      type: 'video',
+      name: name.trim() || 'Гость',
+      deviceId: getDeviceId()
+    })
     if (socket.connected) emit()
     else {
       socket.once('connect', emit)
@@ -68,6 +78,7 @@ const RoomManager = () => {
       return
     }
     rememberName()
+    armQuietly()
     rememberRoom(roomId, { title: 'Комната' })
     setRooms(listRooms())
     navigate(`/room/${roomId}`)
@@ -75,20 +86,19 @@ const RoomManager = () => {
 
   const openRoom = (room) => {
     rememberName()
+    armQuietly()
     navigate(`/room/${room.id}`)
   }
 
   return (
     <div className="landing">
       <div className="landing-card">
-        <p className="eyebrow">Семейные комнаты · Family rooms</p>
         <h1>Чаты</h1>
         <InstallHint />
         <div className="room-list">
           {rooms.map((room) => (
             <button key={room.id} type="button" className="room-row" onClick={() => openRoom(room)}>
               <strong>{room.family ? 'Семья' : room.title}</strong>
-              <span>{room.family ? 'Семейная комната · Family room' : 'Можно позвонить · Can call'}</span>
             </button>
           ))}
         </div>
@@ -100,7 +110,7 @@ const RoomManager = () => {
         )}
 
         <label className="field">
-          <span>Ваше имя / Your name</span>
+          <span>Имя</span>
           <input
             value={name}
             maxLength={24}
@@ -119,22 +129,18 @@ const RoomManager = () => {
             onClick={startMeeting}
             style={{ fontSize: '1.1rem', padding: '0.9rem 1.2rem' }}
           >
-            <BsCameraVideo /> {busy ? 'Создаём…' : 'Начать встречу / Start meeting'}
+            <BsCameraVideo /> {busy ? '…' : 'Встреча'}
           </button>
         </div>
 
         <form className="join-form" onSubmit={joinFromPaste}>
-          <input name="code" placeholder="Или вставьте ссылку комнаты / Paste room link" />
+          <input name="code" placeholder="Ссылка комнаты" />
           <button type="submit" className="btn btn-primary">
-            <BsLink45Deg /> Войти / Join
+            <BsLink45Deg /> Войти
           </button>
         </form>
 
         {error && <div className="error">{error}</div>}
-
-        <p className="lead" style={{ marginTop: '1.5rem', fontSize: '0.85rem', opacity: 0.7 }}>
-          Семейный чат с почтой (не для созвона): <Link to="/family">/family</Link>
-        </p>
       </div>
     </div>
   )

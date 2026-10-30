@@ -21,6 +21,7 @@ import MaskEngine from '../utils/MaskEngine'
 import PeerConnection from '../utils/PeerConnection'
 import {
   alertsEnabled,
+  armCallsFromGesture,
   disableCallAlerts,
   enableCallAlerts,
   getDeviceId
@@ -512,41 +513,56 @@ const Room = () => {
     setPinnedId((current) => (current === id ? null : id))
   }
 
+  const flashNote = (text) => {
+    setCallNote(text)
+    window.clearTimeout(flashNote.timer)
+    flashNote.timer = window.setTimeout(() => setCallNote(''), 4200)
+  }
+
   const toggleAlerts = async () => {
     if (alertsOn) {
       await disableCallAlerts(roomId)
       setAlertsOn(false)
-      setCallNote('Звонки выключены / Calls off')
+      flashNote('Звонки выкл')
       return
     }
-    const result = await enableCallAlerts(roomId, getStoredName() || 'Гость')
+    const result = await armCallsFromGesture(getStoredName() || 'Гость')
     if (result.ok) {
       setAlertsOn(true)
-      setCallNote('Вам можно позвонить, даже если вы выйдете из комнаты / People can ring you after you leave')
+      flashNote('Звонки вкл')
       return
     }
-    setCallNote(result.message || 'Не удалось включить звонки / Could not enable calls')
+    flashNote(result.message || 'Не удалось включить звонки')
   }
 
-  const ringSubscribers = () => {
+  const ringSubscribers = async () => {
+    const name = getStoredName() || 'Гость'
+    // Always refresh our own subscription first (Render restarts wipe server subs).
+    const armed = await enableCallAlerts(roomId, name).catch(() => null)
+    if (armed?.ok) setAlertsOn(true)
+    else if (!alertsOn) {
+      const bulk = await armCallsFromGesture(name)
+      if (bulk.ok) setAlertsOn(true)
+    }
+
     setRinging(true)
     const timer = setTimeout(() => setRinging(false), 8000)
     socket.emit('ringRoom', {}, (res) => {
       clearTimeout(timer)
       setRinging(false)
       if (res?.error === 'slow') {
-        setCallNote('Подождите несколько секунд / Wait a few seconds')
+        flashNote('Подождите…')
         return
       }
       if (!res?.total) {
-        setCallNote('Никто ещё не включил звонки. Отправьте ссылку и попросите нажать «Включить звонки». / Nobody has enabled calls yet. Share the link and ask them to tap Enable calls.')
+        flashNote('Откройте приложение на другом телефоне и разрешите уведомления')
         return
       }
       if (!res.sent) {
-        setCallNote('Все, кто включил звонки, уже здесь / Everyone who enabled calls is already here')
+        flashNote('Все уже в комнате')
         return
       }
-      setCallNote(`Звоним: ${res.sent} / Ringing ${res.sent}`)
+      flashNote(`Звоним · ${res.sent}`)
     })
   }
 
@@ -572,27 +588,25 @@ const Room = () => {
     <div className={`meet-room ${chatOpen ? 'has-chat' : ''}`}>
       <header className="meet-header">
         <div>
-          <h1>{roomInfo?.participantCount || 1} в встрече</h1>
-          <p>{copied ? 'Ссылка скопирована' : 'Включите звонки — вам можно позвонить, даже если комната закрыта'}</p>
+          <h1>{roomInfo?.participantCount || 1}</h1>
         </div>
         <div className="meet-header-actions">
           <button type="button" className={`btn btn-small ${alertsOn ? 'btn-success' : 'btn-outline'}`} onClick={toggleAlerts} aria-label={alertsOn ? 'Звонки включены' : 'Включить звонки'}>
-            {alertsOn ? <BsBellFill /> : <BsBell />} <span className="btn-label">{alertsOn ? 'Звонки вкл' : 'Включить звонки'}</span>
+            {alertsOn ? <BsBellFill /> : <BsBell />}
           </button>
           <button type="button" className="btn btn-primary btn-small" onClick={ringSubscribers} disabled={ringing} aria-label={ringing ? 'Звоним' : 'Позвонить'}>
-            <BsTelephone /> <span className="btn-label">{ringing ? 'Звоним…' : 'Позвонить'}</span>
+            <BsTelephone />
           </button>
           <button type="button" className="btn btn-success btn-small" onClick={copyLink} aria-label={copied ? 'Ссылка скопирована' : 'Скопировать ссылку'}>
-            {copied ? <BsCheck /> : <BsCopy />} <span className="btn-label">{copied ? 'Готово' : 'Ссылка'}</span>
+            {copied ? <BsCheck /> : <BsCopy />}
           </button>
         </div>
       </header>
 
-      <InstallHint compact />
-      {callNote && <div className="call-note">{callNote}</div>}
-
+      <InstallHint compact floating />
+      {callNote && <div className="toast-note toast-note-float">{callNote}</div>}
       {error && (
-        <div className="error">
+        <div className="toast-note toast-note-float toast-error">
           {error}
           <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
             Повторить
