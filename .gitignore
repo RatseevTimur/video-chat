@@ -4,7 +4,12 @@ node_modules/
 .vercel
 client/dist/
 client/public/mediapipe
+client/public/downloads/*.apk
 dist/
+client/android/.gradle/
+client/android/app/build/
+client/android/build/
+client/android/local.properties
 
 # secrets & local runtime (never commit)
 .env

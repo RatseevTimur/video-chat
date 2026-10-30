@@ -3,7 +3,8 @@
   "appName": "Video Chat",
   "webDir": "dist",
   "server": {
-    "cleartext": true
+    "androidScheme": "https",
+    "cleartext": false
   },
   "plugins": {
     "Camera": {

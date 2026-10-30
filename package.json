@@ -17,6 +17,7 @@
     "start": "bash ./start.sh",
     "start:server": "cd server && node index.js",
     "mvp": "bash ./start.sh",
-    "mvp:dev": "yarn dev"
+    "mvp:dev": "yarn dev",
+    "apk": "node ./scripts/build-android-apk.mjs"
   }
 }

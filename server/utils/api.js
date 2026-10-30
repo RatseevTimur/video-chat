@@ -13,7 +13,10 @@ import {
   startAuth,
   verifyAuth
 } from './messenger.js'
+import { getDevice, syncDevice } from './devices.js'
 import { mailConfigured, mailStoreEnabled, mailStatus } from './mailer.js'
+
+const DEVICE_RE = /^[a-z0-9]{8,32}$/
 
 function auth(req) {
   const header = req.headers.authorization || ''
@@ -61,8 +64,37 @@ export function attachApi(app) {
       publicUrl: getPublicUrl() || null,
       inviteHint: true,
       urls: listLanUrls(),
+      androidApp: '/downloads/video-chat.apk',
       note: 'Free mode: create a room link and share it. Optional /family for email OTP messenger.'
     })
+  })
+
+  app.get('/api/device/rooms', (req, res) => {
+    const deviceId = String(req.query?.deviceId || '')
+    if (!DEVICE_RE.test(deviceId)) {
+      res.status(400).json({ error: 'Bad device' })
+      return
+    }
+    const row = getDevice(deviceId)
+    res.json({
+      deviceId,
+      name: row?.name || '',
+      rooms: row?.rooms || [],
+      updatedAt: row?.updatedAt || 0
+    })
+  })
+
+  app.post('/api/device/sync', (req, res) => {
+    const deviceId = String(req.body?.deviceId || '')
+    if (!DEVICE_RE.test(deviceId)) {
+      res.status(400).json({ error: 'Bad device' })
+      return
+    }
+    const saved = syncDevice(deviceId, {
+      name: req.body?.name,
+      rooms: Array.isArray(req.body?.rooms) ? req.body.rooms.slice(0, 24) : []
+    })
+    res.json({ ok: true, deviceId, rooms: saved?.rooms || [], name: saved?.name || '' })
   })
 
   app.post('/api/runtime/public-url', (req, res) => {

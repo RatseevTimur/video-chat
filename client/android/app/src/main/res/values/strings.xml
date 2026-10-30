@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Video Chat</string>
+    <string name="title_activity_main">Video Chat</string>
+    <string name="package_name">com.videochat.app</string>
+    <string name="custom_url_scheme">com.videochat.app</string>
+</resources>

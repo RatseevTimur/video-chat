@@ -4,6 +4,11 @@ const LIST_KEY = 'vc-rooms'
 const FAMILY_KEY = 'vc-family-room'
 const ROOM_RE = /^[A-Za-z0-9_-]{6,16}$/
 
+function scheduleSync() {
+  // Lazy import avoids a circular dependency with deviceSync → rooms.
+  import('./deviceSync').then((mod) => mod.pushDeviceRooms().catch(() => {})).catch(() => {})
+}
+
 function readList() {
   try {
     const parsed = JSON.parse(localStorage.getItem(LIST_KEY) || '[]')
@@ -42,10 +47,12 @@ export function rememberRoom(roomId, { title = '', family = false } = {}) {
   const familyId = familyRoom().id
   if (roomId === familyId || family) {
     try { localStorage.setItem(FAMILY_KEY, roomId) } catch { /* ignore */ }
+    scheduleSync()
     return
   }
   const titleClean = String(title || 'Комната').replace(/[<>]/g, '').trim().slice(0, 24) || 'Комната'
   const next = readList().filter((item) => item.id !== roomId)
   next.unshift({ id: roomId, title: titleClean, family: false })
   writeList(next)
+  scheduleSync()
 }

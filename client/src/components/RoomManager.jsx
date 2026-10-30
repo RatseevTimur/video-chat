@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BsCameraVideo, BsLink45Deg } from 'react-icons/bs'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import { syncDeviceNow } from '../utils/deviceSync'
 import { armCallsFromGesture, getDeviceId } from '../utils/push'
 import { listRooms, rememberRoom } from '../utils/rooms'
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
+import AppDownload from './AppDownload'
 import InstallHint from './InstallHint'
 
 /** Google Meet–style: name + one click → shareable room link. No email. */
@@ -19,6 +21,14 @@ const RoomManager = () => {
 
   // Old bookmarks /?invite=… must NOT open email form — stay in free mode
   const legacyInvite = params.get('invite')
+
+  useEffect(() => {
+    syncDeviceNow(name).then((next) => {
+      setRooms(next)
+      const stored = getStoredName()
+      if (stored) setName(stored)
+    }).catch(() => {})
+  }, [])
 
   const rememberName = () => setStoredName(name.trim() || 'Гость')
 
@@ -94,6 +104,7 @@ const RoomManager = () => {
     <div className="landing">
       <div className="landing-card">
         <h1>Чаты</h1>
+        <AppDownload />
         <InstallHint />
         <div className="room-list">
           {rooms.map((room) => (

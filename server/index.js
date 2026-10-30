@@ -49,6 +49,10 @@ app.use(express.static(join(__dirname, '../client/dist'), {
   setHeaders(res, filePath) {
     if (filePath.endsWith('.html') || filePath.endsWith('sw.js') || filePath.endsWith('.webmanifest')) {
       res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    } else if (filePath.endsWith('.apk')) {
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive')
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+      res.setHeader('Content-Disposition', 'attachment; filename="video-chat.apk"')
     } else if (/\.[a-f0-9]{8}\.(js|css)$/i.test(filePath) || filePath.includes('/assets/')) {
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
     }
