@@ -1,10 +1,12 @@
 import { nanoid } from 'nanoid'
 
 import { bindSocket, getChat, getSession, lookupUsers, notifyMembers, unbindSocket } from './messenger.js'
-import { sendRing } from './push.js'
+import { sendCancelRing, sendRing } from './push.js'
 
 const users = {}
 const rooms = {}
+/** roomId → { ringId, from, fromName, at } */
+const activeRings = Object.create(null)
 
 const ID_RE = /^[A-Za-z0-9_-]{4,16}$/
 const ROOM_RE = /^[A-Za-z0-9_-]{6,16}$/
@@ -97,6 +99,30 @@ function notifyHostWaiting(roomId) {
   emit(room.host, 'waitingUpdated', { roomInfo: getRoomInfo(roomId) })
 }
 
+async function cancelActiveRing(roomId, { by, socket } = {}) {
+  const active = activeRings[roomId]
+  if (!active) return null
+  delete activeRings[roomId]
+  const room = rooms[roomId]
+  const skipDevices = Object.values(room?.deviceIds || {}).filter(Boolean)
+  try {
+    await sendCancelRing(roomId, { ringId: active.ringId, skipDevices })
+  } catch (error) {
+    console.warn('cancel push failed', error.message)
+  }
+  const payload = { roomId, ringId: active.ringId, by: by || '' }
+  const nsp = socket?.server || socket?.nsp?.server
+  if (nsp) {
+    nsp.to(`watch:${roomId}`).emit('ringCancelled', payload)
+    nsp.to(roomId).emit('ringCancelled', payload)
+  } else if (socket) {
+    socket.to(`watch:${roomId}`).emit('ringCancelled', payload)
+    socket.to(roomId).emit('ringCancelled', payload)
+    socket.emit('ringCancelled', payload)
+  }
+  return active
+}
+
 function leaveRoom(socketState) {
   const { id, currentRoom, socket } = socketState
   if (!currentRoom || !rooms[currentRoom]) {
@@ -109,6 +135,10 @@ function leaveRoom(socketState) {
   if (room.waiting) delete room.waiting[id]
 
   const wasParticipant = room.participants.includes(id)
+  // If the caller leaves while a ring is active, stop it so callees don't join an empty room.
+  if (wasParticipant && activeRings[currentRoom]?.from === id) {
+    cancelActiveRing(currentRoom, { by: id, socket }).catch(() => {})
+  }
   room.participants = room.participants.filter((userId) => userId !== id)
   room.call.inCall = room.call.inCall.filter((userId) => userId !== id)
   delete room.names[id]
@@ -481,7 +511,20 @@ export default function initSocket(socket) {
       }
       const roomId = state.currentRoom
       const fromName = room.names[state.id] || 'Участник'
+      const ringId = nanoid(10)
       const inRoomDevices = new Set(Object.values(room.deviceIds || {}).filter(Boolean))
+      activeRings[roomId] = {
+        ringId,
+        from: state.id,
+        fromName,
+        at: Date.now()
+      }
+      // Auto-expire unanswered rings after 45s
+      setTimeout(() => {
+        if (activeRings[roomId]?.ringId === ringId) {
+          cancelActiveRing(roomId, { by: 'timeout', socket }).catch(() => {})
+        }
+      }, 45_000)
       try {
         const watchers = await socket.server.in(`watch:${roomId}`).fetchSockets()
         const online = watchers.filter((peer) => {
@@ -494,10 +537,12 @@ export default function initSocket(socket) {
 
         const result = await sendRing(roomId, {
           fromName,
+          ringId,
           skipDevices: [...inRoomDevices]
         })
         socket.to(`watch:${roomId}`).emit('incomingRing', {
           roomId,
+          ringId,
           fromName,
           from: state.id
         })
@@ -505,12 +550,60 @@ export default function initSocket(socket) {
           sent: Math.max(result.sent || 0, online),
           total: Math.max(result.total || 0, online),
           pushed: result.sent || 0,
-          online
+          online,
+          ringId
         })
       } catch (error) {
         console.error('ring failed', error)
+        delete activeRings[roomId]
         done({ sent: 0, total: 0, error: 'failed' })
       }
+    })
+    .on('cancelRing', async (_data, ack) => {
+      const done = typeof ack === 'function' ? ack : () => {}
+      const roomId = state.currentRoom
+      if (!roomId || !activeRings[roomId]) {
+        done({ ok: false })
+        return
+      }
+      if (activeRings[roomId].from !== state.id) {
+        done({ ok: false, error: 'forbidden' })
+        return
+      }
+      await cancelActiveRing(roomId, { by: state.id, socket })
+      done({ ok: true })
+    })
+    .on('answerRing', (data = {}, ack) => {
+      const done = typeof ack === 'function' ? ack : () => {}
+      const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
+      const ringId = typeof data.ringId === 'string' ? data.ringId.trim() : ''
+      if (!ROOM_RE.test(roomId)) {
+        done({ ok: false, error: 'gone' })
+        return
+      }
+      const active = activeRings[roomId]
+      const room = rooms[roomId]
+      if (!active || (ringId && active.ringId !== ringId)) {
+        done({ ok: false, error: 'cancelled' })
+        return
+      }
+      if (!room || room.participants.length === 0) {
+        delete activeRings[roomId]
+        done({ ok: false, error: 'empty' })
+        return
+      }
+      // Accept consumes the ring so others stop.
+      delete activeRings[roomId]
+      sendCancelRing(roomId, {
+        ringId: active.ringId,
+        skipDevices: Object.values(room.deviceIds || {}).filter(Boolean)
+      }).catch(() => {})
+      socket.to(`watch:${roomId}`).emit('ringCancelled', {
+        roomId,
+        ringId: active.ringId,
+        by: 'answered'
+      })
+      done({ ok: true, roomId, ringId: active.ringId })
     })
     .on('ringDeclined', (data = {}) => {
       const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''

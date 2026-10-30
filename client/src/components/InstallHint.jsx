@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { BsPhone } from 'react-icons/bs'
+import { BsBell, BsPhone } from 'react-icons/bs'
 
 import {
   armCallsFromGesture,
   canPromptInstall,
   isIos,
   isStandalone,
-  onInstallable
+  onInstallable,
+  openNotificationSettings
 } from '../utils/push'
 import { getStoredName } from '../utils/session'
 
@@ -15,7 +16,9 @@ const InstallHint = ({ compact = false, floating = false }) => {
   const [installable, setInstallable] = useState(() => canPromptInstall())
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
-  const [hidden, setHidden] = useState(false)
+  const [showSound, setShowSound] = useState(
+    () => typeof Notification !== 'undefined' && Notification.permission === 'granted'
+  )
 
   useEffect(() => {
     const sync = () => {
@@ -32,11 +35,7 @@ const InstallHint = ({ compact = false, floating = false }) => {
   }, [])
 
   const armed = typeof Notification !== 'undefined' && Notification.permission === 'granted'
-  if (hidden || (standalone && armed) || (armed && !installable && !isIos())) {
-    return note ? (
-      <div className={`toast-note ${floating ? 'toast-note-float' : ''}`}>{note}</div>
-    ) : null
-  }
+  const needsInstallCta = !armed || (isIos() && !standalone) || installable
 
   const place = async () => {
     setBusy(true)
@@ -46,16 +45,12 @@ const InstallHint = ({ compact = false, floating = false }) => {
       setStandalone(isStandalone())
       setInstallable(canPromptInstall())
       if (result.ok) {
-        setNote(result.hint || 'Звонки включены — проверьте звук тестового уведомления')
-        setHidden(true)
+        setShowSound(true)
+        setNote(result.hint || 'Звонки включены')
         return
       }
       if (result.reason === 'ios-install' || (isIos() && !isStandalone())) {
         setNote('Поделиться → На экран «Домой»')
-        return
-      }
-      if (!canPromptInstall() && !isStandalone()) {
-        setNote('Меню браузера → На экран')
         return
       }
       if (result.message) setNote(result.message)
@@ -64,20 +59,39 @@ const InstallHint = ({ compact = false, floating = false }) => {
     }
   }
 
+  if (!needsInstallCta && !showSound && !note) return null
+
   const label = busy
     ? '…'
-    : (standalone || armed)
-      ? 'Включить звонки'
-      : (installable ? 'Установить и звонки' : 'Значок + звонки')
+    : armed
+      ? 'Обновить звонки'
+      : (isIos() ? 'На экран + звонки' : (installable ? 'Установить и звонки' : 'Включить звонки'))
 
   return (
     <div className={[
-      floating ? 'toast-note toast-note-float' : (compact ? 'install-note install-note-compact' : 'install-note'),
-      floating ? 'install-float' : ''
-    ].filter(Boolean).join(' ')}>
-      <button type="button" className="btn btn-success btn-small" disabled={busy} onClick={place}>
-        <BsPhone /> {label}
-      </button>
+      floating ? 'toast-note toast-note-float install-float' : (compact ? 'install-note install-note-compact' : 'install-note')
+    ].join(' ')}>
+      {needsInstallCta && (
+        <button type="button" className="btn btn-success btn-small" disabled={busy} onClick={place}>
+          <BsPhone /> {label}
+        </button>
+      )}
+      {showSound && (
+        <button
+          type="button"
+          className="btn btn-outline btn-small"
+          onClick={() => {
+            const ok = openNotificationSettings()
+            setNote(ok
+              ? 'Включите «Оповещение», звук и вибрацию'
+              : (isIos()
+                ? 'Настройки → Уведомления → Video Chat'
+                : 'Долгое нажатие на уведомление → Оповещение'))
+          }}
+        >
+          <BsBell /> Звук уведомлений
+        </button>
+      )}
       {note && <p>{note}</p>}
     </div>
   )

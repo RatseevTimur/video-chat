@@ -28,8 +28,10 @@ export default function App() {
   const [pc, setPc] = useState(null)
   const [config, setConfig] = useState(null)
   const [incoming, setIncoming] = useState(null)
+  const [ringError, setRingError] = useState('')
   const ringtoneRef = useRef(null)
-  const lastRingRef = useRef({ at: 0, roomId: '' })
+  const lastRingRef = useRef({ at: 0, roomId: '', ringId: '' })
+  const incomingRef = useRef(null)
 
   useEffect(() => {
     const joinWatch = () => watchSavedRooms()
@@ -37,9 +39,10 @@ export default function App() {
     socket.on('connect', joinWatch)
     resubscribeSaved(getStoredName() || 'Гость')
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {})
+      navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update?.())
+        .catch(() => {})
     }
-    // Re-arm watchers after SW is ready (covers Render restarts / new VAPID keys)
     if (navigator.serviceWorker?.ready) {
       navigator.serviceWorker.ready.then(() => resubscribeSaved(getStoredName() || 'Гость')).catch(() => {})
     }
@@ -51,20 +54,32 @@ export default function App() {
   }, [])
 
   useEffect(() => {
+    const stopLocalRing = () => {
+      ringtoneRef.current?.stop()
+      ringtoneRef.current = null
+      stopVibrate()
+      setIncoming(null)
+      lastRingRef.current = { at: 0, roomId: '' }
+    }
+
     const showRing = (payload) => {
       const roomId = payload?.roomId
       if (!roomId) return
       if (window.location.pathname === `/room/${roomId}`) return
       const now = Date.now()
-      if (lastRingRef.current.roomId === roomId && now - lastRingRef.current.at < 4000) return
-      lastRingRef.current = { at: now, roomId }
+      if (
+        lastRingRef.current.roomId === roomId
+        && lastRingRef.current.ringId === (payload.ringId || '')
+        && now - lastRingRef.current.at < 4000
+      ) return
+      lastRingRef.current = { at: now, roomId, ringId: payload.ringId || '' }
       setIncoming({
         roomId,
+        ringId: payload.ringId || '',
         fromName: payload.fromName || 'Участник'
       })
       ringtoneRef.current?.stop()
       ringtoneRef.current = createRingtone()
-      // Page audio/vibrate only work while visible; OS push handles the locked/minimized case.
       if (document.visibilityState === 'visible') {
         ringtoneRef.current.start()
         startVibrate()
@@ -73,33 +88,76 @@ export default function App() {
 
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return
-      if (!ringtoneRef.current && !lastRingRef.current.roomId) return
-      // Only resume while a recent ring is still relevant.
-      if (Date.now() - lastRingRef.current.at > 20000) return
-      ringtoneRef.current?.resumeIfVisible?.()
+      if (!lastRingRef.current.roomId) return
+      if (Date.now() - lastRingRef.current.at > 45000) return
+      if (!ringtoneRef.current) ringtoneRef.current = createRingtone()
+      ringtoneRef.current.resumeIfVisible?.()
       startVibrate()
+    }
+
+    const onCancelled = (payload) => {
+      const roomId = payload?.roomId
+      if (!roomId) return
+      if (incomingRef.current?.roomId === roomId || lastRingRef.current.roomId === roomId) {
+        navigator.serviceWorker?.controller?.postMessage({ type: 'stop-ring', roomId })
+        stopLocalRing()
+      }
+    }
+
+    const answerFromNotice = (url, roomId, ringId) => {
+      ringtoneRef.current?.stop()
+      stopVibrate()
+      setIncoming(null)
+      const go = () => {
+        const path = String(url || `/room/${roomId}`).replace(window.location.origin, '')
+        navigate(path.startsWith('/') ? path : `/${path}`)
+      }
+      if (!roomId) {
+        go()
+        return
+      }
+      socket.emit('answerRing', { roomId, ringId: ringId || '' }, (res) => {
+        if (!res?.ok) {
+          stopLocalRing()
+          setRingError(res?.error === 'empty'
+            ? 'Комната уже пуста — звонок отменён'
+            : 'Звонок уже отменён')
+          window.setTimeout(() => setRingError(''), 4000)
+          return
+        }
+        go()
+      })
     }
 
     const onServiceMessage = (event) => {
       if (event.data?.type === 'incoming-call') showRing(event.data)
-      if (event.data?.type === 'navigate-call' && event.data.url) {
-        const path = String(event.data.url).replace(window.location.origin, '')
-        ringtoneRef.current?.stop()
-        stopVibrate()
-        setIncoming(null)
-        navigate(path.startsWith('/') ? path : `/${path}`)
+      if (event.data?.type === 'ring-cancelled') onCancelled(event.data)
+      if (event.data?.type === 'ring-declined') {
+        if (event.data.roomId) {
+          socket.emit('ringDeclined', { roomId: event.data.roomId, name: getStoredName() || 'Участник' })
+        }
+        onCancelled(event.data)
+      }
+      if (event.data?.type === 'navigate-call') {
+        answerFromNotice(event.data.url, event.data.roomId, event.data.ringId)
       }
     }
 
     socket.on('incomingRing', showRing)
+    socket.on('ringCancelled', onCancelled)
     document.addEventListener('visibilitychange', onVisible)
     navigator.serviceWorker?.addEventListener('message', onServiceMessage)
     return () => {
       socket.off('incomingRing', showRing)
+      socket.off('ringCancelled', onCancelled)
       document.removeEventListener('visibilitychange', onVisible)
       navigator.serviceWorker?.removeEventListener('message', onServiceMessage)
     }
   }, [navigate])
+
+  useEffect(() => {
+    incomingRef.current = incoming
+  }, [incoming])
 
   useEffect(() => {
     socket.emit('init', { id: getStoredId() })
@@ -193,23 +251,42 @@ export default function App() {
 
   const answerRing = () => {
     const roomId = incoming?.roomId
+    const ringId = incoming?.ringId || ''
     ringtoneRef.current?.stop()
     stopVibrate()
-    setIncoming(null)
-    if (roomId) navigate(`/room/${roomId}`)
+    if (!roomId) {
+      setIncoming(null)
+      return
+    }
+    socket.emit('answerRing', { roomId, ringId }, (res) => {
+      setIncoming(null)
+      if (!res?.ok) {
+        lastRingRef.current = { at: 0, roomId: '', ringId: '' }
+        navigator.serviceWorker?.controller?.postMessage({ type: 'stop-ring', roomId })
+        setRingError(res?.error === 'empty'
+          ? 'Комната уже пуста — звонок отменён'
+          : 'Звонок уже отменён')
+        window.setTimeout(() => setRingError(''), 4000)
+        return
+      }
+      navigate(`/room/${roomId}`)
+    })
   }
 
   const declineRing = () => {
     if (incoming?.roomId) {
       socket.emit('ringDeclined', { roomId: incoming.roomId, name: getStoredName() || 'Участник' })
+      navigator.serviceWorker?.controller?.postMessage({ type: 'stop-ring', roomId: incoming.roomId })
     }
     ringtoneRef.current?.stop()
     stopVibrate()
     setIncoming(null)
+    lastRingRef.current = { at: 0, roomId: '', ringId: '' }
   }
 
   return (
     <div className="app">
+      {ringError && <div className="toast-note toast-note-float toast-error">{ringError}</div>}
       {incoming && (
         <IncomingCall
           fromName={incoming.fromName}

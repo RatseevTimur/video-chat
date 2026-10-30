@@ -1,7 +1,15 @@
-/* Push-only worker: rings even when the site is closed. No asset cache. */
+/* Push worker: call alerts when the site is closed/minimized. */
 
 const rings = new Map()
-const VIBRATE = [800, 200, 800, 200, 800, 200, 1200]
+const VIBRATE = [600, 200, 600, 200, 600, 400, 900]
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(self.skipWaiting())
+})
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim())
+})
 
 function stopRing(roomId) {
   const token = rings.get(roomId)
@@ -12,15 +20,17 @@ function stopRing(roomId) {
 async function closeTagged(roomId) {
   const list = await self.registration.getNotifications()
   list.forEach((note) => {
-    if (note.data?.roomId === roomId || String(note.tag || '').startsWith(`call-${roomId}`)) {
+    const tag = String(note.tag || '')
+    if (note.data?.roomId === roomId || tag === `call-${roomId}` || tag.startsWith(`call-${roomId}-`)) {
       note.close()
     }
   })
 }
 
 async function showCallNotice(payload, pulse) {
-  const tag = `call-${payload.roomId}-${pulse}`
-  const options = {
+  // Stable base tag + pulse suffix so Android re-alerts without stacking forever.
+  const tag = pulse === 0 ? `call-${payload.roomId}` : `call-${payload.roomId}-${pulse}`
+  await self.registration.showNotification(payload.title, {
     body: payload.body,
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
@@ -30,25 +40,17 @@ async function showCallNotice(payload, pulse) {
     silent: false,
     vibrate: VIBRATE,
     timestamp: Date.now(),
-    data: { url: payload.url, roomId: payload.roomId, pulse },
+    data: {
+      url: payload.url,
+      roomId: payload.roomId,
+      ringId: payload.ringId || '',
+      pulse
+    },
     actions: [
       { action: 'accept', title: 'Ответить' },
       { action: 'decline', title: 'Отклонить' }
     ]
-  }
-
-  // Newer Chromium: call-style notice with system ringtone (ignored if unsupported).
-  try {
-    await self.registration.showNotification(payload.title, {
-      ...options,
-      scenario: 'incoming-call'
-    })
-    return
-  } catch {
-    // fall through
-  }
-
-  await self.registration.showNotification(payload.title, options)
+  })
 }
 
 self.addEventListener('push', (event) => {
@@ -60,9 +62,20 @@ self.addEventListener('push', (event) => {
       data = { title: 'Входящий звонок', body: 'Video Chat' }
     }
 
+    // Caller cancelled — stop pulsing and clear notices.
+    if (data.type === 'cancel' || data.cancel) {
+      const roomId = data.roomId || ''
+      stopRing(roomId)
+      await closeTagged(roomId)
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      windows.forEach((client) => client.postMessage({ type: 'ring-cancelled', roomId, ringId: data.ringId || '' }))
+      return
+    }
+
     const payload = {
       type: 'incoming-call',
       roomId: data.roomId || '',
+      ringId: data.ringId || '',
       fromName: data.fromName || '',
       url: data.url || '/',
       title: data.title || 'Входящий звонок',
@@ -72,19 +85,18 @@ self.addEventListener('push', (event) => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     windows.forEach((client) => client.postMessage(payload))
     const visible = windows.some((client) => client.visibilityState === 'visible')
-    // Foreground page plays its own ringtone + vibrate.
     if (visible) return
 
     const roomId = payload.roomId || 'call'
+    stopRing(roomId)
     const token = { stop: false }
     rings.set(roomId, token)
 
-    // Pulse with a NEW tag each time so Android re-alerts (same tag often stays silent).
-    for (let i = 0; i < 10 && !token.stop; i += 1) {
-      await closeTagged(roomId)
+    for (let i = 0; i < 8 && !token.stop; i += 1) {
+      if (i > 0) await closeTagged(roomId)
       await showCallNotice(payload, i)
-      if (i < 9 && !token.stop) {
-        await new Promise((resolve) => setTimeout(resolve, 1800))
+      if (i < 7 && !token.stop) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
       }
     }
     rings.delete(roomId)
@@ -94,24 +106,39 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
   const roomId = event.notification.data?.roomId || ''
+  const ringId = event.notification.data?.ringId || ''
   stopRing(roomId)
-  closeTagged(roomId)
-  if (event.action === 'decline') return
-  const url = new URL(event.notification.data?.url || '/', self.location.origin).href
+  event.waitUntil(closeTagged(roomId))
+  if (event.action === 'decline') {
+    event.waitUntil((async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      windows.forEach((client) => client.postMessage({ type: 'ring-declined', roomId, ringId }))
+    })())
+    return
+  }
+  const url = new URL(event.notification.data?.url || '/', self.location.origin)
+  if (ringId) url.searchParams.set('ring', ringId)
+  const href = url.href
 
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
     for (const client of windows) {
       if ('focus' in client) {
         await client.focus()
-        client.postMessage({ type: 'navigate-call', url })
+        client.postMessage({ type: 'navigate-call', url: href, roomId, ringId })
         return
       }
     }
-    if (self.clients.openWindow) await self.clients.openWindow(url)
+    if (self.clients.openWindow) await self.clients.openWindow(href)
   })())
 })
 
-self.addEventListener('notificationclose', () => {
-  // Closing the previous pulse also fires this. The ring loop / click handler owns stop.
+self.addEventListener('notificationclose', () => {})
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'stop-ring') {
+    const roomId = event.data.roomId || ''
+    stopRing(roomId)
+    event.waitUntil(closeTagged(roomId))
+  }
 })

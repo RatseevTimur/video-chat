@@ -136,7 +136,7 @@ export function attachPush(app) {
   })
 }
 
-export async function sendRing(roomId, { fromName, skipDevices = [] } = {}) {
+async function pushAll(roomId, payload, { skipDevices = [], urgency = 'high', ttl = 45 } = {}) {
   const skip = new Set(skipDevices.filter(Boolean))
   const subs = loadSubs().filter((item) => item.roomId === roomId && !skip.has(item.deviceId))
   const total = loadSubs().filter((item) => item.roomId === roomId).length
@@ -149,21 +149,12 @@ export async function sendRing(roomId, { fromName, skipDevices = [] } = {}) {
     return { sent: 0, total, error: 'unavailable' }
   }
 
-  const safeName = String(fromName || 'Участник').replace(/\s+/g, ' ').slice(0, 24)
-  const payload = JSON.stringify({
-    title: 'Входящий звонок',
-    body: `${safeName} звонит. Откройте, чтобы войти.`,
-    fromName: safeName,
-    roomId,
-    url: `/room/${roomId}`,
-    tag: `call-${roomId}`
-  })
-
+  const body = JSON.stringify(payload)
   const stale = []
   const results = await Promise.allSettled(subs.map((item) => push.sendNotification(
     item.subscription,
-    payload,
-    { TTL: 45, urgency: 'high', topic: `call-${roomId}`.slice(0, 32) }
+    body,
+    { TTL: ttl, urgency }
   ).catch((error) => {
     const status = error?.statusCode
     if (status === 404 || status === 410) stale.push(item.subscription.endpoint)
@@ -174,6 +165,33 @@ export async function sendRing(roomId, { fromName, skipDevices = [] } = {}) {
     saveSubs(loadSubs().filter((item) => !(item.roomId === roomId && stale.includes(item.subscription.endpoint))))
   }
 
-  const sent = results.filter((item) => item.status === 'fulfilled').length
-  return { sent, total }
+  return {
+    sent: results.filter((item) => item.status === 'fulfilled').length,
+    total
+  }
+}
+
+export async function sendRing(roomId, { fromName, ringId = '', skipDevices = [] } = {}) {
+  const safeName = String(fromName || 'Участник').replace(/\s+/g, ' ').slice(0, 24)
+  return pushAll(roomId, {
+    title: 'Входящий звонок',
+    body: `${safeName} звонит. Откройте, чтобы ответить.`,
+    fromName: safeName,
+    roomId,
+    ringId,
+    url: `/room/${roomId}${ringId ? `?ring=${encodeURIComponent(ringId)}` : ''}`,
+    tag: `call-${roomId}`
+  }, { skipDevices, urgency: 'high', ttl: 60 })
+}
+
+export async function sendCancelRing(roomId, { ringId = '', skipDevices = [] } = {}) {
+  return pushAll(roomId, {
+    type: 'cancel',
+    cancel: true,
+    roomId,
+    ringId,
+    title: 'Звонок отменён',
+    body: 'Звонок уже завершён',
+    tag: `call-${roomId}`
+  }, { skipDevices, urgency: 'high', ttl: 30 })
 }

@@ -53,12 +53,42 @@ export function isIos() {
   return /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }
 
+export function isAndroid() {
+  return /android/i.test(navigator.userAgent || '')
+}
+
 export function isStandalone() {
   return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true
 }
 
 export function pushSupported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+}
+
+/** Best-effort open of OS notification settings (Android intents / iOS app-settings). */
+export function openNotificationSettings() {
+  const targets = []
+  if (isAndroid()) {
+    targets.push(
+      'intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;S.android.provider.extra.APP_PACKAGE=com.android.chrome;end',
+      'intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;end',
+      'intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;scheme=package;packageName=com.android.chrome;end'
+    )
+  }
+  if (isIos()) {
+    targets.push('app-settings:')
+  }
+  for (const href of targets) {
+    try {
+      const opened = window.open(href, '_blank')
+      if (opened) return true
+      window.location.href = href
+      return true
+    } catch {
+      // try next
+    }
+  }
+  return false
 }
 
 export function getDeviceId() {
@@ -120,13 +150,15 @@ function urlBase64ToUint8Array(base64String) {
 function sameKey(existing, key) {
   try {
     const a = existing?.options?.applicationServerKey
-    if (!a) return false
+    // If the browser does not expose the key, keep the existing subscription
+    // instead of unsubscribing (that was breaking push after updates).
+    if (!a) return true
     const bytes = a instanceof ArrayBuffer ? new Uint8Array(a) : new Uint8Array(a)
     const b = urlBase64ToUint8Array(key)
     if (bytes.length !== b.length) return false
     return bytes.every((value, i) => value === b[i])
   } catch {
-    return false
+    return true
   }
 }
 
@@ -138,13 +170,28 @@ async function publicKey() {
   return data.publicKey
 }
 
-async function pushSubscription() {
-  const reg = await navigator.serviceWorker.register('/sw.js')
+async function ensureServiceWorker() {
+  const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+  reg.update?.().catch(() => {})
   await navigator.serviceWorker.ready
+  return reg
+}
+
+async function pushSubscription() {
+  const reg = await ensureServiceWorker()
   const key = await publicKey()
   const existing = await reg.pushManager.getSubscription()
   if (existing && sameKey(existing, key)) return existing
-  if (existing) await existing.unsubscribe().catch(() => {})
+  if (existing) {
+    try {
+      // Only replace when we know the VAPID key changed.
+      const a = existing.options?.applicationServerKey
+      if (a) await existing.unsubscribe().catch(() => {})
+      else return existing
+    } catch {
+      return existing
+    }
+  }
   return reg.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: urlBase64ToUint8Array(key)
@@ -160,14 +207,14 @@ export async function probeCallAlert() {
   if (!pushSupported() || !window.isSecureContext) return
   if (Notification.permission !== 'granted') return
   try {
-    const reg = await navigator.serviceWorker.ready
+    const reg = await ensureServiceWorker()
     await reg.showNotification('Проверка звонка', {
-      body: 'Должны быть звук и вибрация. Если тихо — откройте настройки уведомлений приложения и включите «Оповещение».',
+      body: 'Нужны звук и вибрация. Если тихо — нажмите «Звук уведомлений» в приложении.',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
       tag: `vc-probe-${Date.now()}`,
       renotify: true,
-      requireInteraction: false,
+      requireInteraction: true,
       silent: false,
       vibrate: [700, 160, 700, 160, 900],
       timestamp: Date.now()
@@ -179,9 +226,9 @@ export async function probeCallAlert() {
 
 export function callSoundHint() {
   if (isIos()) {
-    return 'iPhone: звук пуша = системный. Беззвучный режим глушит и звук, и часто вибрацию.'
+    return 'Если тихо: отключите беззвучный режим и проверьте уведомления для Video Chat.'
   }
-  return 'Android: Долгое нажатие на уведомление → Настройки → режим «Оповещение» + звук и вибрация. Chrome → Настройки → Уведомления → Web Apps → Вибрация.'
+  return 'Если тихо: нажмите «Звук уведомлений» → режим «Оповещение» + звук и вибрация.'
 }
 
 export async function enableCallAlerts(roomId, name) {

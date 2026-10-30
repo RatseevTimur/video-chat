@@ -66,6 +66,7 @@ const Room = () => {
   const [alertsOn, setAlertsOn] = useState(() => alertsEnabled(roomId))
   const [callNote, setCallNote] = useState('')
   const [ringing, setRinging] = useState(false)
+  const [activeRingId, setActiveRingId] = useState('')
 
   const localVideo = useRef(null)
   const localCanvas = useRef(null)
@@ -466,6 +467,11 @@ const Room = () => {
   }
 
   const leaveRoom = () => {
+    if (ringing || activeRingId) {
+      socket.emit('cancelRing', {})
+      setRinging(false)
+      setActiveRingId('')
+    }
     closeAllPeers()
     socket.emit('leaveRoom')
     navigate('/')
@@ -535,7 +541,29 @@ const Room = () => {
     flashNote(result.message || 'Не удалось включить звонки')
   }
 
+  const cancelOutgoingRing = () => {
+    socket.emit('cancelRing', {}, () => {
+      setRinging(false)
+      setActiveRingId('')
+      flashNote('Звонок отменён')
+    })
+  }
+
+  useEffect(() => {
+    const onCancelled = ({ roomId: id } = {}) => {
+      if (id && id !== roomId) return
+      setRinging(false)
+      setActiveRingId('')
+    }
+    socket.on('ringCancelled', onCancelled)
+    return () => socket.off('ringCancelled', onCancelled)
+  }, [roomId])
+
   const ringSubscribers = async () => {
+    if (ringing) {
+      cancelOutgoingRing()
+      return
+    }
     const name = getStoredName() || 'Гость'
     // Always refresh our own subscription first (Render restarts wipe server subs).
     const armed = await enableCallAlerts(roomId, name).catch(() => null)
@@ -546,23 +574,24 @@ const Room = () => {
     }
 
     setRinging(true)
-    const timer = setTimeout(() => setRinging(false), 8000)
     socket.emit('ringRoom', {}, (res) => {
-      clearTimeout(timer)
-      setRinging(false)
       if (res?.error === 'slow') {
+        setRinging(false)
         flashNote('Подождите…')
         return
       }
       if (!res?.total) {
+        setRinging(false)
         flashNote('Откройте приложение на другом телефоне и разрешите уведомления')
         return
       }
       if (!res.sent) {
+        setRinging(false)
         flashNote('Все уже в комнате')
         return
       }
-      flashNote(`Звоним · ${res.sent}`)
+      setActiveRingId(res.ringId || '')
+      flashNote(`Звоним · ${res.sent} · нажмите ещё раз чтобы отменить`)
     })
   }
 
@@ -594,8 +623,14 @@ const Room = () => {
           <button type="button" className={`btn btn-small ${alertsOn ? 'btn-success' : 'btn-outline'}`} onClick={toggleAlerts} aria-label={alertsOn ? 'Звонки включены' : 'Включить звонки'}>
             {alertsOn ? <BsBellFill /> : <BsBell />}
           </button>
-          <button type="button" className="btn btn-primary btn-small" onClick={ringSubscribers} disabled={ringing} aria-label={ringing ? 'Звоним' : 'Позвонить'}>
-            <BsTelephone />
+          <button
+            type="button"
+            className={`btn btn-small ${ringing ? 'btn-danger' : 'btn-primary'}`}
+            onClick={ringSubscribers}
+            aria-label={ringing ? 'Отменить звонок' : 'Позвонить'}
+            title={ringing ? 'Отменить звонок' : 'Позвонить'}
+          >
+            {ringing ? <FiPhoneOff /> : <BsTelephone />}
           </button>
           <button type="button" className="btn btn-success btn-small" onClick={copyLink} aria-label={copied ? 'Ссылка скопирована' : 'Скопировать ссылку'}>
             {copied ? <BsCheck /> : <BsCopy />}
