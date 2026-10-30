@@ -59,6 +59,53 @@ export function createRingtone() {
   }
 }
 
+/** Outgoing “гудок” for the caller while waiting for answer. */
+export function createRingback() {
+  let ctx = null
+  let timer = null
+  let stopped = true
+
+  const burst = () => {
+    if (stopped || !ctx) return
+    const mk = (freq, peak = 0.07) => {
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      osc.type = 'sine'
+      osc.frequency.value = freq
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(peak, ctx.currentTime + 0.05)
+      gain.gain.setValueAtTime(peak, ctx.currentTime + 0.9)
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 1.15)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start()
+      osc.stop(ctx.currentTime + 1.2)
+    }
+    // Soft ringback pair (not as urgent as incoming ringtone)
+    mk(440, 0.06)
+    mk(480, 0.05)
+  }
+
+  return {
+    async start() {
+      stopped = false
+      ctx = new (window.AudioContext || window.webkitAudioContext)()
+      if (ctx.state === 'suspended') await ctx.resume().catch(() => {})
+      burst()
+      timer = setInterval(burst, 2800)
+    },
+    stop() {
+      stopped = true
+      clearInterval(timer)
+      timer = null
+      if (ctx) {
+        ctx.close().catch(() => {})
+        ctx = null
+      }
+    }
+  }
+}
+
 let vibrateTimer = null
 
 export function startVibrate() {
@@ -76,4 +123,18 @@ export function stopVibrate() {
   if (vibrateTimer) clearInterval(vibrateTimer)
   vibrateTimer = null
   navigator.vibrate?.(0)
+}
+
+export function notifyIncoming(title, body) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return
+  try {
+    new Notification(title, { body, silent: false })
+  } catch {
+    // Safari can throw if the tab is not focused enough
+  }
+}
+
+export function requestNotifyPermission() {
+  if (!('Notification' in window) || Notification.permission !== 'default') return
+  Notification.requestPermission().catch(() => {})
 }

@@ -26,6 +26,7 @@ import {
   enableCallAlerts,
   getDeviceId
 } from '../utils/push'
+import { createRingback } from '../utils/ringtone'
 import { familyRoom, rememberRoom } from '../utils/rooms'
 import { getStoredId, getStoredName } from '../utils/session'
 import socket from '../utils/socket'
@@ -67,6 +68,8 @@ const Room = () => {
   const [callNote, setCallNote] = useState('')
   const [ringing, setRinging] = useState(false)
   const [activeRingId, setActiveRingId] = useState('')
+  const [ringTargets, setRingTargets] = useState(0)
+  const ringbackRef = useRef(null)
 
   const localVideo = useRef(null)
   const localCanvas = useRef(null)
@@ -466,11 +469,24 @@ const Room = () => {
     outboundRef.current?.getAudioTracks().forEach((track) => { track.enabled = next })
   }
 
+  const stopRingback = () => {
+    ringbackRef.current?.stop()
+    ringbackRef.current = null
+  }
+
+  const startRingback = () => {
+    stopRingback()
+    ringbackRef.current = createRingback()
+    ringbackRef.current.start().catch(() => {})
+  }
+
   const leaveRoom = () => {
     if (ringing || activeRingId) {
       socket.emit('cancelRing', {})
       setRinging(false)
       setActiveRingId('')
+      setRingTargets(0)
+      stopRingback()
     }
     closeAllPeers()
     socket.emit('leaveRoom')
@@ -545,6 +561,8 @@ const Room = () => {
     socket.emit('cancelRing', {}, () => {
       setRinging(false)
       setActiveRingId('')
+      setRingTargets(0)
+      stopRingback()
       flashNote('Звонок отменён')
     })
   }
@@ -554,9 +572,14 @@ const Room = () => {
       if (id && id !== roomId) return
       setRinging(false)
       setActiveRingId('')
+      setRingTargets(0)
+      stopRingback()
     }
     socket.on('ringCancelled', onCancelled)
-    return () => socket.off('ringCancelled', onCancelled)
+    return () => {
+      socket.off('ringCancelled', onCancelled)
+      stopRingback()
+    }
   }, [roomId])
 
   const ringSubscribers = async () => {
@@ -574,24 +597,29 @@ const Room = () => {
     }
 
     setRinging(true)
+    startRingback()
     socket.emit('ringRoom', {}, (res) => {
       if (res?.error === 'slow') {
         setRinging(false)
+        stopRingback()
         flashNote('Подождите…')
         return
       }
       if (!res?.total) {
         setRinging(false)
+        stopRingback()
         flashNote('Откройте приложение на другом телефоне и разрешите уведомления')
         return
       }
       if (!res.sent) {
         setRinging(false)
+        stopRingback()
         flashNote('Все уже в комнате')
         return
       }
       setActiveRingId(res.ringId || '')
-      flashNote(`Звоним · ${res.sent} · нажмите ещё раз чтобы отменить`)
+      setRingTargets(res.sent || 1)
+      flashNote(`Звоним · ${res.sent}`)
     })
   }
 
@@ -625,7 +653,7 @@ const Room = () => {
           </button>
           <button
             type="button"
-            className={`btn btn-small ${ringing ? 'btn-danger' : 'btn-primary'}`}
+            className={`btn btn-small ${ringing ? 'btn-danger is-ringing' : 'btn-primary'}`}
             onClick={ringSubscribers}
             aria-label={ringing ? 'Отменить звонок' : 'Позвонить'}
             title={ringing ? 'Отменить звонок' : 'Позвонить'}
@@ -638,8 +666,22 @@ const Room = () => {
         </div>
       </header>
 
+      {ringing && (
+        <div className="outgoing-call">
+          <div className="outgoing-call-pulse" aria-hidden />
+          <div className="outgoing-call-card">
+            <p className="outgoing-call-label">Исходящий звонок</p>
+            <h2>Звоним{ringTargets ? ` · ${ringTargets}` : '…'}</h2>
+            <p className="outgoing-call-hint">Ожидаем ответ</p>
+            <button type="button" className="btn btn-danger" onClick={cancelOutgoingRing}>
+              <FiPhoneOff /> Отменить
+            </button>
+          </div>
+        </div>
+      )}
+
       <InstallHint compact floating />
-      {callNote && <div className="toast-note toast-note-float">{callNote}</div>}
+      {callNote && !ringing && <div className="toast-note toast-note-float">{callNote}</div>}
       {error && (
         <div className="toast-note toast-note-float toast-error">
           {error}
