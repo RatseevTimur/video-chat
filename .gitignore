@@ -4,12 +4,17 @@ node_modules/
 .vercel
 client/dist/
 client/public/mediapipe
+# Built APK (regenerate with: CAP_SERVER_URL=… yarn apk) — do not commit binaries
 client/public/downloads/*.apk
+client/dist/downloads/*.apk
+*.apk
 dist/
 client/android/.gradle/
-client/android/app/build/
-client/android/build/
+client/android/**/build/
 client/android/local.properties
+client/android/app/src/main/assets/public/
+client/android/app/src/main/assets/capacitor.config.json
+client/android/app/src/main/assets/capacitor.plugins.json
 
 # secrets & local runtime (never commit)
 .env
