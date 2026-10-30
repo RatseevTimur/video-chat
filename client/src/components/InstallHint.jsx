@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
-import { BsBell, BsPhone } from 'react-icons/bs'
+import { BsPhone } from 'react-icons/bs'
 
 import {
   armCallsFromGesture,
   canPromptInstall,
+  isAndroid,
   isIos,
   isStandalone,
-  onInstallable,
-  openNotificationSettings
+  onInstallable
 } from '../utils/push'
 import { getStoredName } from '../utils/session'
+import SoundHelpButton from './SoundHelpButton'
 
 const InstallHint = ({ compact = false, floating = false }) => {
   const [standalone, setStandalone] = useState(() => isStandalone())
@@ -19,6 +20,7 @@ const InstallHint = ({ compact = false, floating = false }) => {
   const [showSound, setShowSound] = useState(
     () => typeof Notification !== 'undefined' && Notification.permission === 'granted'
   )
+  const mobile = isAndroid() || isIos()
 
   useEffect(() => {
     const sync = () => {
@@ -33,6 +35,9 @@ const InstallHint = ({ compact = false, floating = false }) => {
       off()
     }
   }, [])
+
+  // Desktop: no install CTA here — APK/Home Screen belongs on the phone (see AppDownload).
+  if (!mobile) return null
 
   const armed = typeof Notification !== 'undefined' && Notification.permission === 'granted'
   const needsInstallCta = !armed || (isIos() && !standalone) || installable
@@ -76,22 +81,7 @@ const InstallHint = ({ compact = false, floating = false }) => {
           <BsPhone /> {label}
         </button>
       )}
-      {showSound && (
-        <button
-          type="button"
-          className="btn btn-outline btn-small"
-          onClick={() => {
-            const ok = openNotificationSettings()
-            setNote(ok
-              ? 'Включите «Оповещение», звук и вибрацию'
-              : (isIos()
-                ? 'Настройки → Уведомления → Video Chat'
-                : 'Долгое нажатие на уведомление → Оповещение'))
-          }}
-        >
-          <BsBell /> Звук уведомлений
-        </button>
-      )}
+      {showSound && <SoundHelpButton />}
       {note && <p>{note}</p>}
     </div>
   )

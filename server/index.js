@@ -34,11 +34,21 @@ attachApi(app)
 attachPush(app)
 
 app.get('/api/ice', (_req, res) => {
-  res.json({
-    iceServers: [
-      { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] }
-    ]
-  })
+  // STUN + public TURN so phones on cellular can see each other (pure STUN often fails).
+  const iceServers = [
+    { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.l.google.com:19302'] },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:80?transport=tcp',
+        'turn:openrelay.metered.ca:443',
+        'turns:openrelay.metered.ca:443?transport=tcp'
+      ],
+      username: process.env.TURN_USERNAME || 'openrelayproject',
+      credential: process.env.TURN_CREDENTIAL || 'openrelayproject'
+    }
+  ]
+  res.json({ iceServers })
 })
 
 app.get('/api/health', (_req, res) => {

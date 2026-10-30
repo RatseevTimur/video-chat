@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { BsCameraVideo, BsPlus, BsSend } from 'react-icons/bs'
 import { useNavigate, useParams } from 'react-router-dom'
 
+import { enterRoom } from '../utils/appNav'
 import { api, clearSession, getSession } from '../utils/auth'
 import { loadOrCreateKeys, openBox, sealForMembers } from '../utils/e2e'
 import { createRingtone, notifyIncoming, requestNotifyPermission } from '../utils/ringtone'
@@ -52,7 +53,7 @@ const Messenger = () => {
     setActive(data.chat)
     setMembers(data.users || [])
     setMessages(await decryptList(data.messages || [], data.users || []))
-    navigate(`/chat/${id}`)
+    navigate(`/chat/${id}`, { replace: Boolean(chatId) })
   }
 
   useEffect(() => {
@@ -135,7 +136,7 @@ const Messenger = () => {
   const callAll = () => {
     if (!active) return
     socket.emit('startChatCall', { chatId: active.id, roomId: active.roomId })
-    navigate(`/room/${active.roomId}?family=1`)
+    enterRoom(navigate, active.roomId, { family: true })
   }
 
   const people = useMemo(
@@ -152,7 +153,7 @@ const Messenger = () => {
             ringtoneRef.current?.stop()
             const roomId = incoming.roomId
             setIncoming(null)
-            navigate(`/room/${roomId}?family=1`)
+            enterRoom(navigate, roomId, { family: true })
           }}
           onReject={() => {
             ringtoneRef.current?.stop()

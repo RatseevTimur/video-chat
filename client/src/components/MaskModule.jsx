@@ -49,7 +49,7 @@ const MaskModule = () => {
   return (
     <div className="mask-demo">
       <div className="meet-header">
-        <Link to="/" className="btn btn-outline">Назад / Back</Link>
+        <Link to="/" replace className="btn btn-outline">Назад / Back</Link>
         <h1>Демо масок / Mask demo</h1>
       </div>
       {status && <div className="error">{status}</div>}

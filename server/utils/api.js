@@ -13,7 +13,7 @@ import {
   startAuth,
   verifyAuth
 } from './messenger.js'
-import { getDevice, syncDevice } from './devices.js'
+import { getDevice, removeDeviceRoom, setDeviceRooms, syncDevice } from './devices.js'
 import { mailConfigured, mailStoreEnabled, mailStatus } from './mailer.js'
 
 const DEVICE_RE = /^[a-z0-9]{8,32}$/
@@ -91,6 +91,31 @@ export function attachApi(app) {
       return
     }
     const saved = syncDevice(deviceId, {
+      name: req.body?.name,
+      rooms: Array.isArray(req.body?.rooms) ? req.body.rooms.slice(0, 24) : []
+    })
+    res.json({ ok: true, deviceId, rooms: saved?.rooms || [], name: saved?.name || '' })
+  })
+
+  app.post('/api/device/room/remove', (req, res) => {
+    const deviceId = String(req.body?.deviceId || '')
+    const roomId = String(req.body?.roomId || '')
+    if (!DEVICE_RE.test(deviceId)) {
+      res.status(400).json({ error: 'Bad device' })
+      return
+    }
+    const saved = removeDeviceRoom(deviceId, roomId)
+    res.json({ ok: true, rooms: saved?.rooms || [] })
+  })
+
+  /** Replace the full room list (used after local delete — no merge). */
+  app.post('/api/device/rooms/set', (req, res) => {
+    const deviceId = String(req.body?.deviceId || '')
+    if (!DEVICE_RE.test(deviceId)) {
+      res.status(400).json({ error: 'Bad device' })
+      return
+    }
+    const saved = setDeviceRooms(deviceId, {
       name: req.body?.name,
       rooms: Array.isArray(req.body?.rooms) ? req.body.rooms.slice(0, 24) : []
     })

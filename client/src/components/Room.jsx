@@ -27,6 +27,7 @@ import {
   getDeviceId
 } from '../utils/push'
 import { createRingback } from '../utils/ringtone'
+import { goAppBack } from '../utils/appNav'
 import { familyRoom, rememberRoom } from '../utils/rooms'
 import { getStoredId, getStoredName } from '../utils/session'
 import socket from '../utils/socket'
@@ -70,6 +71,9 @@ const Room = () => {
   const [activeRingId, setActiveRingId] = useState('')
   const [ringTargets, setRingTargets] = useState(0)
   const ringbackRef = useRef(null)
+  const leaveRoomTimerRef = useRef(null)
+  const stopRingbackRef = useRef(() => {})
+  const flashNoteRef = useRef(() => {})
 
   const localVideo = useRef(null)
   const localCanvas = useRef(null)
@@ -217,6 +221,16 @@ const Room = () => {
       pc.on('remoteStream', (stream) => {
         setRemoteStreams((prev) => ({ ...prev, [remoteId]: stream }))
       })
+      pc.on('connectionState', (state) => {
+        if (state === 'failed' || state === 'disconnected') {
+          window.setTimeout(() => {
+            const current = peersRef.current.get(remoteId)
+            if (current === pc && shouldRestart(pc)) {
+              ensurePeer(remoteId, { restart: true }).catch(() => {})
+            }
+          }, 1200)
+        }
+      })
       pc.start(asCaller, { audio: true, video: true }, {
         skipRequest: true,
         stream: outboundRef.current
@@ -264,7 +278,7 @@ const Room = () => {
       .on('roomError', ({ message }) => {
         setError(message)
         if (String(message).toLowerCase().includes('не найдена') || String(message).toLowerCase().includes('not found')) {
-          navigate('/')
+          goAppBack(navigate)
         }
       })
       .on('userJoined', ({ roomInfo: info, userId }) => {
@@ -296,7 +310,11 @@ const Room = () => {
       })
       .on('chatMessage', ({ message }) => addMessage(message))
       .on('ringDeclined', ({ name }) => {
-        setCallNote(`${name || 'Участник'} отклонил звонок / declined`)
+        setRinging(false)
+        setActiveRingId('')
+        setRingTargets(0)
+        stopRingbackRef.current()
+        flashNoteRef.current(`${name || 'Участник'} отклонил звонок`)
       })
       .on('call', async (data) => {
         const from = data?.from
@@ -314,13 +332,19 @@ const Room = () => {
     if (socket.connected) boot()
     else socket.once('connect', boot)
 
+    // StrictMode remounts quickly — defer leave so the second mount can cancel it.
+    let leaveTimer = null
     return () => {
       closeAllPeers()
-      socket.emit('leaveRoom')
+      leaveTimer = setTimeout(() => socket.emit('leaveRoom'), 600)
       ;['init', 'roomJoined', 'roomError', 'userJoined', 'userLeft', 'hostChanged', 'peerMediaReady', 'chatMessage', 'call', 'ringDeclined']
         .forEach((ev) => socket.off(ev))
       rawStreamRef.current?.getTracks().forEach((track) => track.stop())
       engineRef.current?.dispose()
+      // Cancel deferred leave if this cleanup is from StrictMode remount.
+      // (A new effect for the same roomId will clear this via the ref below.)
+      if (leaveRoomTimerRef.current) clearTimeout(leaveRoomTimerRef.current)
+      leaveRoomTimerRef.current = leaveTimer
     }
   }, [roomId, navigate, meshWith, ensurePeer, closePeer, closeAllPeers, flushQueue, addMessage])
 
@@ -411,6 +435,11 @@ const Room = () => {
   }, [mediaReady])
 
   useEffect(() => {
+    // Cancel a pending StrictMode leave from the previous mount of this room.
+    if (leaveRoomTimerRef.current) {
+      clearTimeout(leaveRoomTimerRef.current)
+      leaveRoomTimerRef.current = null
+    }
     setAlertsOn(alertsEnabled(roomId))
     setPinnedId(null)
     const family = familyRoom()
@@ -418,6 +447,7 @@ const Room = () => {
       title: roomId === family.id ? 'Семья' : 'Комната',
       family: roomId === family.id
     })
+    import('../utils/unread').then((mod) => mod.clearUnread(roomId)).catch(() => {})
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
       enableCallAlerts(roomId, getStoredName() || 'Гость').then((result) => {
         if (result?.ok) setAlertsOn(true)
@@ -473,6 +503,7 @@ const Room = () => {
     ringbackRef.current?.stop()
     ringbackRef.current = null
   }
+  stopRingbackRef.current = stopRingback
 
   const startRingback = () => {
     stopRingback()
@@ -490,7 +521,7 @@ const Room = () => {
     }
     closeAllPeers()
     socket.emit('leaveRoom')
-    navigate('/')
+    goAppBack(navigate)
   }
 
   const sendMessage = (text) => {
@@ -540,6 +571,7 @@ const Room = () => {
     window.clearTimeout(flashNote.timer)
     flashNote.timer = window.setTimeout(() => setCallNote(''), 4200)
   }
+  flashNoteRef.current = flashNote
 
   const toggleAlerts = async () => {
     if (alertsOn) {
@@ -568,17 +600,23 @@ const Room = () => {
   }
 
   useEffect(() => {
-    const onCancelled = ({ roomId: id } = {}) => {
-      if (id && id !== roomId) return
+    const stopOutgoing = () => {
       setRinging(false)
       setActiveRingId('')
       setRingTargets(0)
-      stopRingback()
+      stopRingbackRef.current()
     }
+    const onCancelled = ({ roomId: id } = {}) => {
+      if (id && id !== roomId) return
+      stopOutgoing()
+    }
+    const onDeclined = () => stopOutgoing()
     socket.on('ringCancelled', onCancelled)
+    socket.on('ringDeclined', onDeclined)
     return () => {
       socket.off('ringCancelled', onCancelled)
-      stopRingback()
+      socket.off('ringDeclined', onDeclined)
+      stopRingbackRef.current()
     }
   }, [roomId])
 
@@ -605,10 +643,12 @@ const Room = () => {
         flashNote('Подождите…')
         return
       }
+      // Keep ringback for the full server window (45s) even if nobody is subscribed yet —
+      // otherwise phones looked like the call "instantly reset".
+      setActiveRingId(res?.ringId || '')
+      setRingTargets(res?.sent || 0)
       if (!res?.total) {
-        setRinging(false)
-        stopRingback()
-        flashNote('Откройте приложение на другом телефоне и разрешите уведомления')
+        flashNote('На другом телефоне откройте этот чат и включите уведомления')
         return
       }
       if (!res.sent) {
@@ -617,8 +657,6 @@ const Room = () => {
         flashNote('Все уже в комнате')
         return
       }
-      setActiveRingId(res.ringId || '')
-      setRingTargets(res.sent || 1)
       flashNote(`Звоним · ${res.sent}`)
     })
   }

@@ -9,10 +9,10 @@ import {
   isIos,
   isStandalone,
   onInstallable,
-  openNotificationSettings,
   promptInstall
 } from '../utils/push'
 import { getStoredName } from '../utils/session'
+import SoundHelpButton from './SoundHelpButton'
 
 const APK_URL = '/downloads/video-chat.apk'
 
@@ -25,8 +25,9 @@ const AppDownload = () => {
 
   useEffect(() => {
     if (isNativeApp()) return undefined
-    fetch(APK_URL, { method: 'HEAD' })
-      .then((res) => setApkOk(res.ok))
+    // Prefer GET — some mobile browsers mishandle HEAD on large APKs.
+    fetch(APK_URL, { method: 'GET', headers: { Range: 'bytes=0-0' } })
+      .then((res) => setApkOk(res.ok || res.status === 206))
       .catch(() => setApkOk(false))
     return onInstallable(() => setInstallable(canPromptInstall()))
   }, [])
@@ -39,7 +40,14 @@ const AppDownload = () => {
     )
   }
 
-  if (isStandalone()) return null
+  if (isStandalone()) {
+    return (
+      <div className="app-download">
+        <SoundHelpButton />
+        {note && <p>{note}</p>}
+      </div>
+    )
+  }
 
   const arm = async () => {
     setBusy(true)
@@ -71,52 +79,35 @@ const AppDownload = () => {
     )
   }
 
-  // —— Android ——
+  // —— Android phone/tablet —— always show APK CTA (even while checking)
   if (isAndroid()) {
     return (
       <div className="app-download">
-        {apkOk && (
-          <a className="btn btn-success" href={APK_URL} download="video-chat.apk">
-            <BsPhone /> Скачать Android
-          </a>
+        <a className="btn btn-success" href={APK_URL} download="video-chat.apk">
+          <BsPhone /> Скачать Android
+        </a>
+        {apkOk === false && (
+          <p>Файл APK ещё не залит на сервер — ниже можно поставить значок Chrome.</p>
         )}
-        {(installable || !apkOk) && (
-          <button type="button" className="btn btn-outline" disabled={busy} onClick={arm}>
-            {busy ? '…' : (installable ? 'Установить в Chrome' : 'Включить звонки')}
-          </button>
-        )}
-        <button
-          type="button"
-          className="btn btn-outline btn-small"
-          onClick={() => {
-            const ok = openNotificationSettings()
-            setNote(ok
-              ? 'В настройках включите «Оповещение», звук и вибрацию'
-              : 'Долгое нажатие на уведомление → Настройки → Оповещение')
-          }}
-        >
-          Звук уведомлений
+        <button type="button" className="btn btn-outline" disabled={busy} onClick={arm}>
+          {busy ? '…' : (installable ? 'Или установить в Chrome' : 'Включить звонки')}
         </button>
-        <p>Android: установите приложение, разрешите уведомления, затем «Звук уведомлений».</p>
+        <SoundHelpButton />
+        <p>Для звонка на заблокированный экран нужен значок или APK + уведомления.</p>
         {note && <p>{note}</p>}
       </div>
     )
   }
 
-  // —— Desktop / other ——
+  // —— Desktop —— no APK primary; point people to their phone
   return (
     <div className="app-download">
       {installable && (
         <button type="button" className="btn btn-success" disabled={busy} onClick={arm}>
-          <BsPhone /> {busy ? '…' : 'Установить приложение'}
+          <BsPhone /> {busy ? '…' : 'Установить на этот ПК'}
         </button>
       )}
-      {apkOk && (
-        <a className="btn btn-outline" href={APK_URL} download="video-chat.apk">
-          APK для Android
-        </a>
-      )}
-      <p>На телефоне откройте этот сайт — предложим установку под вашу платформу.</p>
+      <p>APK и звонки на блокировке — откройте этот сайт на телефоне Android.</p>
       {note && <p>{note}</p>}
     </div>
   )

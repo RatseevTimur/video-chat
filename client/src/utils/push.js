@@ -65,29 +65,57 @@ export function pushSupported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
 }
 
-/** Best-effort open of OS notification settings (Android intents / iOS app-settings). */
-export function openNotificationSettings() {
-  const targets = []
-  if (isAndroid()) {
-    targets.push(
-      'intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;S.android.provider.extra.APP_PACKAGE=com.android.chrome;end',
-      'intent:#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;end',
-      'intent:#Intent;action=android.settings.APPLICATION_DETAILS_SETTINGS;scheme=package;packageName=com.android.chrome;end'
-    )
-  }
-  if (isIos()) {
-    targets.push('app-settings:')
-  }
-  for (const href of targets) {
+/**
+ * In-app help for call sound — never navigates away (intent:// left a blank screen).
+ * Sends a test notification so Android can open channel settings via long-press.
+ */
+export async function helpCallSound() {
+  const steps = isIos()
+    ? [
+        'Откройте Настройки → Уведомления → Video Chat (или Safari / Chrome).',
+        'Включите уведомления и звук, выключите беззвучный режим телефона.'
+      ]
+    : [
+        'Сейчас появится тестовое уведомление «Проверка звонка».',
+        'Долгое нажатие по нему → Настройки / Оповещение.',
+        'Режим «Оповещение» (не «Без звука») + звук и вибрация.'
+      ]
+
+  let probed = false
+  if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
     try {
-      const opened = window.open(href, '_blank')
-      if (opened) return true
-      window.location.href = href
-      return true
+      await probeCallAlert()
+      probed = true
     } catch {
-      // try next
+      probed = false
+    }
+  } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+    const permission = await Notification.requestPermission().catch(() => 'denied')
+    if (permission === 'granted') {
+      try {
+        await probeCallAlert()
+        probed = true
+      } catch {
+        probed = false
+      }
     }
   }
+
+  return {
+    ok: true,
+    probed,
+    title: 'Звук звонка',
+    steps,
+    hint: probed
+      ? (isIos()
+        ? 'Если тихо — проверьте Настройки → Уведомления.'
+        : 'Долго нажмите на уведомление «Проверка звонка» и включите «Оповещение».')
+      : 'Сначала нажмите «Включить звонки» и разрешите уведомления.'
+  }
+}
+
+/** @deprecated use helpCallSound — never navigates (old intent:// opened a blank page) */
+export function openNotificationSettings() {
   return false
 }
 
@@ -133,8 +161,12 @@ export function savedAlertRooms() {
 
 export function watchSavedRooms() {
   const deviceId = getDeviceId()
-  savedAlertRooms().forEach((roomId) => {
-    socket.emit('watchRoom', { roomId, deviceId })
+  const ids = new Set([
+    ...savedAlertRooms(),
+    ...listRooms().map((room) => room.id)
+  ])
+  ids.forEach((roomId) => {
+    if (roomId) socket.emit('watchRoom', { roomId, deviceId })
   })
 }
 
@@ -204,23 +236,26 @@ function fail(reason, message) {
 
 /** Fires a real OS notice so the user can turn on sound/vibrate in system settings. */
 export async function probeCallAlert() {
-  if (!pushSupported() || !window.isSecureContext) return
-  if (Notification.permission !== 'granted') return
+  if (!pushSupported() || !window.isSecureContext) return false
+  if (Notification.permission !== 'granted') return false
   try {
     const reg = await ensureServiceWorker()
     await reg.showNotification('Проверка звонка', {
-      body: 'Нужны звук и вибрация. Если тихо — нажмите «Звук уведомлений» в приложении.',
+      body: isAndroid()
+        ? 'Долгое нажатие → Настройки → режим «Оповещение» + звук и вибрация.'
+        : 'Нужны звук и вибрация для входящих звонков.',
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
-      tag: `vc-probe-${Date.now()}`,
+      tag: 'vc-probe-sound',
       renotify: true,
       requireInteraction: true,
       silent: false,
       vibrate: [700, 160, 700, 160, 900],
       timestamp: Date.now()
     })
+    return true
   } catch {
-    // ignore
+    return false
   }
 }
 
@@ -228,7 +263,7 @@ export function callSoundHint() {
   if (isIos()) {
     return 'Если тихо: отключите беззвучный режим и проверьте уведомления для Video Chat.'
   }
-  return 'Если тихо: нажмите «Звук уведомлений» → режим «Оповещение» + звук и вибрация.'
+  return 'Если тихо: «Проверить звук» → долгое нажатие на уведомление → «Оповещение».'
 }
 
 export async function enableCallAlerts(roomId, name) {

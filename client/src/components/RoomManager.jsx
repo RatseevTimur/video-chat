@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { BsCameraVideo, BsLink45Deg } from 'react-icons/bs'
+import { BsCameraVideo, BsLink45Deg, BsTrash } from 'react-icons/bs'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
+import { enterRoom } from '../utils/appNav'
 import { syncDeviceNow } from '../utils/deviceSync'
 import { armCallsFromGesture, getDeviceId } from '../utils/push'
-import { listRooms, rememberRoom } from '../utils/rooms'
+import { forgetRoom, listRooms, rememberRoom } from '../utils/rooms'
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
+import { allUnread, clearUnread, getUnread } from '../utils/unread'
 import AppDownload from './AppDownload'
 import InstallHint from './InstallHint'
 
@@ -18,8 +20,8 @@ const RoomManager = () => {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [rooms, setRooms] = useState(() => listRooms())
+  const [unreadMap, setUnreadMap] = useState(() => allUnread())
 
-  // Old bookmarks /?invite=… must NOT open email form — stay in free mode
   const legacyInvite = params.get('invite')
 
   useEffect(() => {
@@ -28,6 +30,23 @@ const RoomManager = () => {
       const stored = getStoredName()
       if (stored) setName(stored)
     }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const refresh = () => setUnreadMap(allUnread())
+    const onChat = (payload) => {
+      const roomId = payload?.roomId || payload?.message?.roomId
+      if (!roomId) return
+      if (window.location.pathname === `/room/${roomId}`) return
+      // App.jsx owns bumpUnread; we only refresh the badge UI.
+      refresh()
+    }
+    socket.on('chatMessage', onChat)
+    window.addEventListener('vc-unread', refresh)
+    return () => {
+      socket.off('chatMessage', onChat)
+      window.removeEventListener('vc-unread', refresh)
+    }
   }, [])
 
   const rememberName = () => setStoredName(name.trim() || 'Гость')
@@ -55,7 +74,7 @@ const RoomManager = () => {
       socket.off('roomError', onError)
       rememberRoom(roomId, { title: 'Комната' })
       setRooms(listRooms())
-      navigate(`/room/${roomId}`)
+      enterRoom(navigate, roomId)
     }
     const onError = ({ message }) => {
       clearTimeout(timer)
@@ -91,13 +110,23 @@ const RoomManager = () => {
     armQuietly()
     rememberRoom(roomId, { title: 'Комната' })
     setRooms(listRooms())
-    navigate(`/room/${roomId}`)
+    enterRoom(navigate, roomId)
   }
 
   const openRoom = (room) => {
     rememberName()
     armQuietly()
-    navigate(`/room/${room.id}`)
+    clearUnread(room.id)
+    setUnreadMap(allUnread())
+    enterRoom(navigate, room.id)
+  }
+
+  const removeRoom = (event, room) => {
+    event.stopPropagation()
+    if (room.family) return
+    if (!window.confirm(`Удалить комнату ${room.title} (${room.id})?`)) return
+    setRooms(forgetRoom(room.id))
+    setUnreadMap(allUnread())
   }
 
   return (
@@ -107,11 +136,31 @@ const RoomManager = () => {
         <AppDownload />
         <InstallHint />
         <div className="room-list">
-          {rooms.map((room) => (
-            <button key={room.id} type="button" className="room-row" onClick={() => openRoom(room)}>
-              <strong>{room.family ? 'Семья' : room.title}</strong>
-            </button>
-          ))}
+          {rooms.map((room) => {
+            const unread = Number(unreadMap[room.id] || getUnread(room.id) || 0)
+            return (
+              <div key={room.id} className="room-row-wrap">
+                <button type="button" className="room-row" onClick={() => openRoom(room)}>
+                  <span className="room-row-main">
+                    <strong>{room.family ? 'Семья' : room.title}</strong>
+                    {unread > 0 && <span className="room-unread">{unread > 99 ? '99+' : unread}</span>}
+                  </span>
+                  <span className="room-id">{room.id}</span>
+                </button>
+                {!room.family && (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-small room-delete"
+                    aria-label={`Удалить ${room.id}`}
+                    title="Удалить комнату"
+                    onClick={(event) => removeRoom(event, room)}
+                  >
+                    <BsTrash /> Удалить
+                  </button>
+                )}
+              </div>
+            )
+          })}
         </div>
 
         {legacyInvite && (

@@ -71,3 +71,36 @@ export function touchDeviceRoom(deviceId, room) {
   if (!DEVICE_RE.test(deviceId) || !cleaned) return null
   return syncDevice(deviceId, { rooms: [cleaned] })
 }
+
+/** Replace the full room list for a device (used after local delete). */
+export function setDeviceRooms(deviceId, { name = '', rooms = [] } = {}) {
+  if (!DEVICE_RE.test(deviceId)) return null
+  const map = load()
+  const byId = new Map()
+  ;(Array.isArray(rooms) ? rooms : [])
+    .map(cleanRoom)
+    .filter(Boolean)
+    .forEach((room) => byId.set(room.id, room))
+  const family = [...byId.values()].find((room) => room.family)
+  const rest = [...byId.values()].filter((room) => !room.family).slice(0, 23)
+  const nextRooms = family ? [family, ...rest] : rest
+  map[deviceId] = {
+    name: String(name || map[deviceId]?.name || '').replace(/[<>]/g, '').trim().slice(0, 24),
+    rooms: nextRooms,
+    updatedAt: Date.now()
+  }
+  save(map)
+  return map[deviceId]
+}
+
+export function removeDeviceRoom(deviceId, roomId) {
+  if (!DEVICE_RE.test(deviceId) || !ROOM_RE.test(String(roomId || ''))) return null
+  const map = load()
+  const prev = map[deviceId]
+  if (!prev) return null
+  prev.rooms = (prev.rooms || []).filter((room) => room.id !== roomId)
+  prev.updatedAt = Date.now()
+  map[deviceId] = prev
+  save(map)
+  return prev
+}

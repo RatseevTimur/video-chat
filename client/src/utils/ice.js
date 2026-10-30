@@ -3,17 +3,20 @@ const FALLBACK = [
 ]
 
 let cached = null
+let cachedAt = 0
 
 export async function getIceServers() {
-  if (cached) return cached
+  if (cached && Date.now() - cachedAt < 60_000) return cached
   try {
     const response = await fetch('/api/ice', { cache: 'no-store' })
     if (!response.ok) throw new Error('ice')
     const data = await response.json()
     cached = Array.isArray(data.iceServers) && data.iceServers.length ? data.iceServers : FALLBACK
+    cachedAt = Date.now()
     return cached
   } catch {
     cached = FALLBACK
+    cachedAt = Date.now()
     return cached
   }
 }

@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { BsPhoneVibrate } from 'react-icons/bs'
-import { Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useNavigationType,
+  useParams
+} from 'react-router-dom'
 
 import AuthGate from './components/AuthGate'
 import CallModal from './components/CallModal'
@@ -11,12 +19,68 @@ import MaskModule from './components/MaskModule'
 import Messenger from './components/Messenger'
 import Room from './components/Room'
 import RoomManager from './components/RoomManager'
+import { enterRoom, goAppBack, parentPath, resolveTreeBack } from './utils/appNav'
+import { isNativeApp } from './utils/native'
 import PeerConnection from './utils/PeerConnection'
 import { resubscribeSaved, watchSavedRooms } from './utils/push'
 import { createRingtone, startVibrate, stopVibrate } from './utils/ringtone'
 import { getStoredId, getStoredName } from './utils/session'
 import socket from './utils/socket'
+import { bumpUnread } from './utils/unread'
 import './styles/app.scss'
+
+/** Browser/Android back → route-tree parent only (not arbitrary history entries). */
+function TreeBackGuard() {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const navType = useNavigationType()
+  const prevRef = useRef({ pathname: location.pathname, search: location.search })
+  const bootedRef = useRef(false)
+  const snappingRef = useRef(false)
+
+  useEffect(() => {
+    // RR reports POP on the initial document load — skip that once.
+    if (!bootedRef.current) {
+      bootedRef.current = true
+      prevRef.current = { pathname: location.pathname, search: location.search }
+      return
+    }
+
+    const prev = prevRef.current
+    if (navType === 'POP' && !snappingRef.current) {
+      const snapTo = resolveTreeBack(prev, location)
+      if (snapTo != null) {
+        snappingRef.current = true
+        navigate(snapTo, { replace: true })
+        prevRef.current = { pathname: snapTo, search: '' }
+        queueMicrotask(() => { snappingRef.current = false })
+        return
+      }
+    }
+    prevRef.current = { pathname: location.pathname, search: location.search }
+  }, [location, navType, navigate])
+
+  useEffect(() => {
+    if (!isNativeApp()) return undefined
+    let handle = null
+    let cancelled = false
+    const pkg = '@capacitor/app'
+    import(/* @vite-ignore */ pkg).then(({ App }) => {
+      if (cancelled) return
+      handle = App.addListener('backButton', () => {
+        if (goAppBack(navigate)) return
+        App.exitApp()
+      })
+    }).catch(() => {})
+    return () => {
+      cancelled = true
+      handle?.then?.((h) => h.remove()).catch?.(() => {})
+      handle?.remove?.()
+    }
+  }, [navigate])
+
+  return null
+}
 
 export default function App() {
   const navigate = useNavigate()
@@ -109,8 +173,12 @@ export default function App() {
       stopVibrate()
       setIncoming(null)
       const go = () => {
-        const path = String(url || `/room/${roomId}`).replace(window.location.origin, '')
-        navigate(path.startsWith('/') ? path : `/${path}`)
+        if (roomId) {
+          enterRoom(navigate, roomId)
+          return
+        }
+        const path = String(url || '/').replace(window.location.origin, '')
+        navigate(path.startsWith('/') ? path : `/${path}`, { replace: true })
       }
       if (!roomId) {
         go()
@@ -129,6 +197,15 @@ export default function App() {
       })
     }
 
+    const onChatMessage = (payload) => {
+      const roomId = payload?.roomId
+      const message = payload?.message
+      if (!roomId || !message) return
+      if (window.location.pathname === `/room/${roomId}`) return
+      bumpUnread(roomId, 1)
+      window.dispatchEvent(new Event('vc-unread'))
+    }
+
     const onServiceMessage = (event) => {
       if (event.data?.type === 'incoming-call') showRing(event.data)
       if (event.data?.type === 'ring-cancelled') onCancelled(event.data)
@@ -138,6 +215,10 @@ export default function App() {
         }
         onCancelled(event.data)
       }
+      if (event.data?.type === 'chat-message' && event.data.roomId) {
+        bumpUnread(event.data.roomId, 1)
+        window.dispatchEvent(new Event('vc-unread'))
+      }
       if (event.data?.type === 'navigate-call') {
         answerFromNotice(event.data.url, event.data.roomId, event.data.ringId)
       }
@@ -145,11 +226,13 @@ export default function App() {
 
     socket.on('incomingRing', showRing)
     socket.on('ringCancelled', onCancelled)
+    socket.on('chatMessage', onChatMessage)
     document.addEventListener('visibilitychange', onVisible)
     navigator.serviceWorker?.addEventListener('message', onServiceMessage)
     return () => {
       socket.off('incomingRing', showRing)
       socket.off('ringCancelled', onCancelled)
+      socket.off('chatMessage', onChatMessage)
       document.removeEventListener('visibilitychange', onVisible)
       navigator.serviceWorker?.removeEventListener('message', onServiceMessage)
     }
@@ -269,7 +352,7 @@ export default function App() {
         window.setTimeout(() => setRingError(''), 4000)
         return
       }
-      navigate(`/room/${roomId}`)
+      enterRoom(navigate, roomId)
     })
   }
 
@@ -286,6 +369,7 @@ export default function App() {
 
   return (
     <div className="app">
+      <TreeBackGuard />
       {ringError && <div className="toast-note toast-note-float toast-error">{ringError}</div>}
       {incoming && (
         <IncomingCall

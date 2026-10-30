@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
 
 import { bindSocket, getChat, getSession, lookupUsers, notifyMembers, unbindSocket } from './messenger.js'
-import { sendCancelRing, sendRing } from './push.js'
+import { sendCancelRing, sendChatPush, sendRing } from './push.js'
 
 const users = {}
 const rooms = {}
@@ -99,9 +99,27 @@ function notifyHostWaiting(roomId) {
   emit(room.host, 'waitingUpdated', { roomInfo: getRoomInfo(roomId) })
 }
 
+function broadcastRingCancelled(roomId, payload, socket) {
+  const nsp = socket?.nsp
+  if (nsp) {
+    nsp.to(roomId).emit('ringCancelled', payload)
+    nsp.to(`watch:${roomId}`).emit('ringCancelled', payload)
+  } else if (socket) {
+    socket.to(roomId).emit('ringCancelled', payload)
+    socket.to(`watch:${roomId}`).emit('ringCancelled', payload)
+    socket.emit('ringCancelled', payload)
+  }
+  // Direct map emit so the caller always gets it even if room membership is odd.
+  emitToRoom(roomId, 'ringCancelled', payload)
+}
+
 async function cancelActiveRing(roomId, { by, socket } = {}) {
   const active = activeRings[roomId]
-  if (!active) return null
+  const payload = { roomId, ringId: active?.ringId || '', by: by || '' }
+  if (!active) {
+    broadcastRingCancelled(roomId, payload, socket)
+    return null
+  }
   delete activeRings[roomId]
   const room = rooms[roomId]
   const skipDevices = Object.values(room?.deviceIds || {}).filter(Boolean)
@@ -110,16 +128,7 @@ async function cancelActiveRing(roomId, { by, socket } = {}) {
   } catch (error) {
     console.warn('cancel push failed', error.message)
   }
-  const payload = { roomId, ringId: active.ringId, by: by || '' }
-  const nsp = socket?.server || socket?.nsp?.server
-  if (nsp) {
-    nsp.to(`watch:${roomId}`).emit('ringCancelled', payload)
-    nsp.to(roomId).emit('ringCancelled', payload)
-  } else if (socket) {
-    socket.to(`watch:${roomId}`).emit('ringCancelled', payload)
-    socket.to(roomId).emit('ringCancelled', payload)
-    socket.emit('ringCancelled', payload)
-  }
+  broadcastRingCancelled(roomId, payload, socket)
   return active
 }
 
@@ -479,7 +488,17 @@ export default function initSocket(socket) {
         ts: Date.now()
       }
       pushMessage(room, message)
-      emitToRoom(state.currentRoom, 'chatMessage', { message }, socket)
+      const roomId = state.currentRoom
+      emitToRoom(roomId, 'chatMessage', { message }, socket)
+      // Watchers (app open on home, not in room) also get the message for unread badges.
+      socket.to(`watch:${roomId}`).emit('chatMessage', { message, roomId })
+      // Offline push for devices subscribed to this room but not currently in it.
+      const inRoomDevices = Object.values(room.deviceIds || {}).filter(Boolean)
+      sendChatPush(roomId, {
+        fromName: message.fromName,
+        text: message.text,
+        skipDevices: inRoomDevices
+      }).catch(() => {})
     })
     .on('watchRoom', (data = {}) => {
       const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
@@ -605,13 +624,14 @@ export default function initSocket(socket) {
       })
       done({ ok: true, roomId, ringId: active.ringId })
     })
-    .on('ringDeclined', (data = {}) => {
+    .on('ringDeclined', async (data = {}) => {
       const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
-      if (!ROOM_RE.test(roomId) || !rooms[roomId]) return
+      if (!ROOM_RE.test(roomId)) return
       if (!rateLimit(limits, 'decline', 5, 10_000)) return
-      emitToRoom(roomId, 'ringDeclined', {
-        name: sanitizeName(data.name) || 'Участник'
-      })
+      const name = sanitizeName(data.name) || 'Участник'
+      // Stop caller's ringback + clear push loop for everyone.
+      await cancelActiveRing(roomId, { by: name, socket })
+      emitToRoom(roomId, 'ringDeclined', { name })
     })
     .on('identify', ({ token } = {}) => {
       const session = getSession(token)

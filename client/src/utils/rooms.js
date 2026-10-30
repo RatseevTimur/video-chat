@@ -56,3 +56,18 @@ export function rememberRoom(roomId, { title = '', family = false } = {}) {
   writeList(next)
   scheduleSync()
 }
+
+/** Remove a room from the local list (family room cannot be deleted). */
+export function forgetRoom(roomId) {
+  if (!ROOM_RE.test(String(roomId || ''))) return listRooms()
+  const familyId = familyRoom().id
+  if (roomId === familyId) return listRooms()
+  writeList(readList().filter((item) => item.id !== roomId))
+  import('./unread').then((mod) => mod.clearUnread(roomId)).catch(() => {})
+  // Replace (not merge-sync) so the deleted room cannot reappear from the server.
+  import('./deviceSync').then(async (mod) => {
+    await mod.removeRemoteRoom(roomId).catch(() => {})
+    await mod.replaceDeviceRooms().catch(() => {})
+  }).catch(() => {})
+  return listRooms()
+}

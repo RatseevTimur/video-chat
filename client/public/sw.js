@@ -72,6 +72,29 @@ self.addEventListener('push', (event) => {
       return
     }
 
+    if (data.type === 'chat') {
+      const roomId = data.roomId || ''
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      windows.forEach((client) => client.postMessage({
+        type: 'chat-message',
+        roomId,
+        title: data.title || 'Сообщение',
+        body: data.body || ''
+      }))
+      const visible = windows.some((client) => client.visibilityState === 'visible')
+      if (visible) return
+      await self.registration.showNotification(data.title || 'Сообщение', {
+        body: data.body || '',
+        icon: '/icons/icon-192.png',
+        badge: '/icons/icon-192.png',
+        tag: data.tag || `chat-${roomId}`,
+        renotify: true,
+        data: { url: data.url || `/room/${roomId}`, roomId },
+        vibrate: [120, 80, 120]
+      })
+      return
+    }
+
     const payload = {
       type: 'incoming-call',
       roomId: data.roomId || '',

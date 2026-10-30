@@ -195,3 +195,17 @@ export async function sendCancelRing(roomId, { ringId = '', skipDevices = [] } =
     tag: `call-${roomId}`
   }, { skipDevices, urgency: 'high', ttl: 30 })
 }
+
+export async function sendChatPush(roomId, { fromName, text, skipDevices = [] } = {}) {
+  const safeName = String(fromName || 'Участник').replace(/\s+/g, ' ').slice(0, 24)
+  const body = String(text || '').replace(/\s+/g, ' ').slice(0, 80)
+  return pushAll(roomId, {
+    type: 'chat',
+    roomId,
+    fromName: safeName,
+    title: safeName,
+    body: body || 'Новое сообщение',
+    url: `/room/${roomId}`,
+    tag: `chat-${roomId}`
+  }, { skipDevices, urgency: 'normal', ttl: 120 })
+}
