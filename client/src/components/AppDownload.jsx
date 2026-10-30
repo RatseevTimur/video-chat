@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BsPhone } from 'react-icons/bs'
+import { BsBell, BsPhone } from 'react-icons/bs'
 
 import { isNativeApp } from '../utils/native'
 import {
@@ -16,44 +16,30 @@ import SoundHelpButton from './SoundHelpButton'
 
 const APK_URL = '/downloads/video-chat.apk'
 
-/** Offer the right install path for this device (Android APK / iOS Home Screen / PWA). */
+/** One install / alerts block for the lobby — no duplicate sound buttons. */
 const AppDownload = () => {
   const [apkOk, setApkOk] = useState(null)
   const [installable, setInstallable] = useState(() => canPromptInstall())
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
+  const native = isNativeApp()
+  const standalone = isStandalone()
+  const android = isAndroid()
+  const ios = isIos()
 
   useEffect(() => {
-    if (isNativeApp()) return undefined
-    // Prefer GET — some mobile browsers mishandle HEAD on large APKs.
+    if (native) return undefined
     fetch(APK_URL, { method: 'GET', headers: { Range: 'bytes=0-0' } })
       .then((res) => setApkOk(res.ok || res.status === 206))
       .catch(() => setApkOk(false))
     return onInstallable(() => setInstallable(canPromptInstall()))
-  }, [])
-
-  if (isNativeApp()) {
-    return (
-      <p className="app-download-note">
-        Приложение установлено · комнаты привязаны к этому телефону
-      </p>
-    )
-  }
-
-  if (isStandalone()) {
-    return (
-      <div className="app-download">
-        <SoundHelpButton />
-        {note && <p>{note}</p>}
-      </div>
-    )
-  }
+  }, [native])
 
   const arm = async () => {
     setBusy(true)
     setNote('')
     try {
-      if (installable) await promptInstall()
+      if (!native && installable) await promptInstall()
       const result = await armCallsFromGesture(getStoredName() || 'Гость')
       if (result.ok) {
         setNote(result.hint || 'Звонки включены')
@@ -66,40 +52,69 @@ const AppDownload = () => {
     }
   }
 
-  // —— iPhone / iPad ——
-  if (isIos()) {
+  // —— Capacitor APK / native shell ——
+  if (native) {
+    return (
+      <div className="app-download">
+        <p className="app-download-note">Нативное приложение · комнаты на этом телефоне</p>
+        <button type="button" className="btn btn-success" disabled={busy} onClick={arm}>
+          <BsBell /> {busy ? '…' : 'Включить звонки'}
+        </button>
+        <SoundHelpButton />
+        <p>Разрешите уведомления — иначе звонок на блокировке будет тихим.</p>
+        {note && <p>{note}</p>}
+      </div>
+    )
+  }
+
+  // —— Already installed as Home Screen / PWA ——
+  if (standalone) {
+    return (
+      <div className="app-download">
+        <button type="button" className="btn btn-success" disabled={busy} onClick={arm}>
+          <BsBell /> {busy ? '…' : 'Включить звонки'}
+        </button>
+        <SoundHelpButton />
+        {note && <p>{note}</p>}
+      </div>
+    )
+  }
+
+  // —— iPhone / iPad in Safari/Chrome ——
+  if (ios) {
     return (
       <div className="app-download">
         <button type="button" className="btn btn-success" disabled={busy} onClick={arm}>
           <BsPhone /> {busy ? '…' : 'На экран Домой + звонки'}
         </button>
-        <p>iPhone: Поделиться → На экран «Домой», затем откройте значок и разрешите уведомления.</p>
+        <SoundHelpButton />
+        <p>iPhone: Поделиться → На экран «Домой», откройте значок, разрешите уведомления. Отдельного App Store IPA пока нет — это PWA.</p>
         {note && <p>{note}</p>}
       </div>
     )
   }
 
-  // —— Android phone/tablet —— always show APK CTA (even while checking)
-  if (isAndroid()) {
+  // —— Android browser ——
+  if (android) {
     return (
       <div className="app-download">
         <a className="btn btn-success" href={APK_URL} download="video-chat.apk">
-          <BsPhone /> Скачать Android
+          <BsPhone /> Скачать приложение (APK)
         </a>
         {apkOk === false && (
-          <p>Файл APK ещё не залит на сервер — ниже можно поставить значок Chrome.</p>
+          <p>APK на сервере ещё недоступен — можно поставить значок Chrome ниже.</p>
         )}
         <button type="button" className="btn btn-outline" disabled={busy} onClick={arm}>
-          {busy ? '…' : (installable ? 'Или установить в Chrome' : 'Включить звонки')}
+          {busy ? '…' : (installable ? 'Или значок Chrome + звонки' : 'Включить звонки в браузере')}
         </button>
         <SoundHelpButton />
-        <p>Для звонка на заблокированный экран нужен значок или APK + уведомления.</p>
+        <p>Для звонка на блокировке нужен APK или значок + уведомления.</p>
         {note && <p>{note}</p>}
       </div>
     )
   }
 
-  // —— Desktop —— no APK primary; point people to their phone
+  // —— Desktop ——
   return (
     <div className="app-download">
       {installable && (
@@ -107,7 +122,7 @@ const AppDownload = () => {
           <BsPhone /> {busy ? '…' : 'Установить на этот ПК'}
         </button>
       )}
-      <p>APK и звонки на блокировке — откройте этот сайт на телефоне Android.</p>
+      <p>Приложение для телефона: откройте этот сайт на Android (APK) или iPhone (На экран «Домой»).</p>
       {note && <p>{note}</p>}
     </div>
   )

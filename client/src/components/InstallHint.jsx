@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { BsPhone } from 'react-icons/bs'
+import { BsBell, BsPhone } from 'react-icons/bs'
 
+import { isNativeApp } from '../utils/native'
 import {
   armCallsFromGesture,
   canPromptInstall,
@@ -10,21 +11,22 @@ import {
   onInstallable
 } from '../utils/push'
 import { getStoredName } from '../utils/session'
-import SoundHelpButton from './SoundHelpButton'
 
+/**
+ * Compact floating hint inside a room only.
+ * Lobby uses AppDownload alone — do not mount both on the same screen.
+ */
 const InstallHint = ({ compact = false, floating = false }) => {
-  const [standalone, setStandalone] = useState(() => isStandalone())
+  const [standalone, setStandalone] = useState(() => isStandalone() || isNativeApp())
   const [installable, setInstallable] = useState(() => canPromptInstall())
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
-  const [showSound, setShowSound] = useState(
-    () => typeof Notification !== 'undefined' && Notification.permission === 'granted'
-  )
-  const mobile = isAndroid() || isIos()
+  const native = isNativeApp()
+  const mobile = native || isAndroid() || isIos()
 
   useEffect(() => {
     const sync = () => {
-      setStandalone(isStandalone())
+      setStandalone(isStandalone() || isNativeApp())
       setInstallable(canPromptInstall())
     }
     const media = window.matchMedia('(display-mode: standalone)')
@@ -36,25 +38,28 @@ const InstallHint = ({ compact = false, floating = false }) => {
     }
   }, [])
 
-  // Desktop: no install CTA here — APK/Home Screen belongs on the phone (see AppDownload).
   if (!mobile) return null
 
   const armed = typeof Notification !== 'undefined' && Notification.permission === 'granted'
-  const needsInstallCta = !armed || (isIos() && !standalone) || installable
+  // Native / already installed: only nudge if alerts are still off.
+  if ((native || standalone) && armed && !note) return null
+  if (!native && !standalone) {
+    const needsInstall = !armed || (isIos() && !standalone) || installable
+    if (!needsInstall && !note) return null
+  }
 
   const place = async () => {
     setBusy(true)
     setNote('')
     try {
       const result = await armCallsFromGesture(getStoredName() || 'Гость')
-      setStandalone(isStandalone())
+      setStandalone(isStandalone() || isNativeApp())
       setInstallable(canPromptInstall())
       if (result.ok) {
-        setShowSound(true)
         setNote(result.hint || 'Звонки включены')
         return
       }
-      if (result.reason === 'ios-install' || (isIos() && !isStandalone())) {
+      if (result.reason === 'ios-install' || (isIos() && !isStandalone() && !native)) {
         setNote('Поделиться → На экран «Домой»')
         return
       }
@@ -64,24 +69,21 @@ const InstallHint = ({ compact = false, floating = false }) => {
     }
   }
 
-  if (!needsInstallCta && !showSound && !note) return null
-
   const label = busy
     ? '…'
     : armed
       ? 'Обновить звонки'
-      : (isIos() ? 'На экран + звонки' : (installable ? 'Установить и звонки' : 'Включить звонки'))
+      : (native || standalone)
+        ? 'Включить звонки'
+        : (isIos() ? 'На экран + звонки' : (installable ? 'Установить и звонки' : 'Включить звонки'))
 
   return (
     <div className={[
       floating ? 'toast-note toast-note-float install-float' : (compact ? 'install-note install-note-compact' : 'install-note')
     ].join(' ')}>
-      {needsInstallCta && (
-        <button type="button" className="btn btn-success btn-small" disabled={busy} onClick={place}>
-          <BsPhone /> {label}
-        </button>
-      )}
-      {showSound && <SoundHelpButton />}
+      <button type="button" className="btn btn-success btn-small" disabled={busy} onClick={place}>
+        {armed ? <BsBell /> : <BsPhone />} {label}
+      </button>
       {note && <p>{note}</p>}
     </div>
   )
