@@ -391,22 +391,39 @@
   button { margin-left: 0.5rem; }
 }
 
+/* Status banners sit in document flow under the header — never over video tiles. */
+.meet-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0 0.7rem 0.45rem;
+  max-width: min(100%, 420px);
+  align-self: center;
+  width: 100%;
+  pointer-events: auto;
+  z-index: 5;
+
+  .toast-note {
+    position: static;
+    transform: none;
+    max-width: none;
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+  }
+}
+
 .toast-note-float {
-  position: absolute;
-  top: 3.1rem;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
+  /* legacy class kept for any leftover call sites — do not cover the grid */
+  position: static;
+  margin: 0 0.7rem 0.45rem;
   max-width: min(92vw, 360px);
-  width: max-content;
 }
 
 .install-float {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.35rem;
-  top: 3.1rem;
+  display: none; /* never float install CTA over video */
 }
 
 .toast-error {

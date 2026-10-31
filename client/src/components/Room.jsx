@@ -35,7 +35,6 @@ import socket from '../utils/socket'
 import { watchSpeaking } from '../utils/voice'
 import EffectsPanel from './EffectsPanel'
 import InCallChat from './InCallChat'
-import InstallHint from './InstallHint'
 import PeerTile from './PeerTile'
 import ReactionBurst, { REACTION_MS, REACTIONS } from './ReactionBurst'
 
@@ -918,30 +917,33 @@ const Room = () => {
         </div>
       )}
 
-      <InstallHint compact floating />
-      {callNote && !ringing && <div className="toast-note toast-note-float">{callNote}</div>}
-      {link !== 'online' && linkSlow && !error && (
-        <div className="toast-note toast-note-float toast-error">
-          {link === 'offline' ? 'Нет связи с сервером — переподключаемся…' : 'Подключаемся к комнате…'}
-          <button type="button" className="btn btn-small" onClick={() => { socket.connect(); socket.emit('init', { id: getStoredId() }) }}>
-            Повторить
-          </button>
-        </div>
-      )}
-      {error && (
-        <div className="toast-note toast-note-float toast-error">
-          {error}
-          {!mediaReady && navigator.mediaDevices?.getUserMedia ? (
-            <button type="button" className="btn btn-small" onClick={() => startPreview()}>
-              Разрешить камеру
-            </button>
-          ) : (
-            <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
-              Повторить
-            </button>
+      {(callNote && !ringing) || (link !== 'online' && linkSlow && !error) || error ? (
+        <div className="meet-banners" aria-live="polite">
+          {callNote && !ringing && <div className="toast-note">{callNote}</div>}
+          {link !== 'online' && linkSlow && !error && (
+            <div className="toast-note toast-error">
+              {link === 'offline' ? 'Нет связи с сервером — переподключаемся…' : 'Подключаемся к комнате…'}
+              <button type="button" className="btn btn-small" onClick={() => { socket.connect(); socket.emit('init', { id: getStoredId() }) }}>
+                Повторить
+              </button>
+            </div>
+          )}
+          {error && (
+            <div className="toast-note toast-error">
+              {error}
+              {!mediaReady && navigator.mediaDevices?.getUserMedia ? (
+                <button type="button" className="btn btn-small" onClick={() => startPreview()}>
+                  Разрешить камеру
+                </button>
+              ) : (
+                <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
+                  Повторить
+                </button>
+              )}
+            </div>
           )}
         </div>
-      )}
+      ) : null}
 
       <div className="meet-stage">
         <section ref={gridRef} className={gridMode} style={gridStyle}>
