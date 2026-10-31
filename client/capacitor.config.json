@@ -3,8 +3,9 @@
   "appName": "Video Chat",
   "webDir": "dist",
   "server": {
-    "androidScheme": "https",
+    "androidScheme": "http",
     "cleartext": true,
+    "hostname": "localhost",
     "allowNavigation": [
       "192.168.0.29:4000"
     ]

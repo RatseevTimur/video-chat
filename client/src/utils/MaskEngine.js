@@ -203,9 +203,12 @@ export default class MaskEngine {
     const my = ((this.pose.y * height) - crop.y) / crop.h * canvas.height
 
     ctx.save()
-    ctx.globalAlpha = Math.min(1, this.pose.visible)
+    // Keep overlays solid — old assets looked "washed out" with low alpha.
+    ctx.globalAlpha = Math.min(1, 0.55 + this.pose.visible * 0.45)
     ctx.translate(mx, my)
     ctx.rotate(this.pose.rotation)
+    ctx.imageSmoothingEnabled = true
+    ctx.imageSmoothingQuality = 'high'
     ctx.drawImage(img, -maskWidth / 2, -maskHeight / 2, maskWidth, maskHeight)
     ctx.restore()
   }

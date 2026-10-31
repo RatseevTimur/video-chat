@@ -56,14 +56,17 @@ if (remoteUi) {
   console.log('CAP_REMOTE_UI=1 — WebView will load', serverUrl)
 } else {
   // Native shell: embed dist locally. JS talks to CAP_SERVER_URL via VITE_SERVER_URL.
+  // Use http scheme when API is http — https://localhost + http API = mixed-content blank UI.
+  const cleartext = serverUrl.startsWith('http://')
   config.server = {
-    androidScheme: 'https',
-    cleartext: serverUrl.startsWith('http://'),
+    androidScheme: cleartext ? 'http' : 'https',
+    cleartext,
+    hostname: 'localhost',
     allowNavigation: [
       serverUrl.replace(/^https?:\/\//, '').split('/')[0]
     ]
   }
-  console.log('Embedded Capacitor shell. API →', serverUrl)
+  console.log('Embedded Capacitor shell. API →', serverUrl, `(scheme ${config.server.androidScheme})`)
 }
 
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
