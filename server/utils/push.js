@@ -140,7 +140,9 @@ async function pushAll(roomId, payload, { skipDevices = [], urgency = 'high', tt
   const skip = new Set(skipDevices.filter(Boolean))
   const subs = loadSubs().filter((item) => item.roomId === roomId && !skip.has(item.deviceId))
   const total = loadSubs().filter((item) => item.roomId === roomId).length
-  if (!subs.length) return { sent: 0, total }
+  // `others` = subscriptions that are NOT the caller's own devices (what we can actually ring).
+  const others = subs.length
+  if (!subs.length) return { sent: 0, total, others }
 
   let push
   try {
@@ -167,7 +169,8 @@ async function pushAll(roomId, payload, { skipDevices = [], urgency = 'high', tt
 
   return {
     sent: results.filter((item) => item.status === 'fulfilled').length,
-    total
+    total,
+    others
   }
 }
 

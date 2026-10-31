@@ -79,10 +79,13 @@ export function listLanUrls(port = PORT, protocol = 'https') {
   return [...new Set(urls)]
 }
 
-export function printBanner(protocol = 'https') {
-  const urls = listLanUrls(PORT, protocol)
+export function printBanner(protocol = 'https', { httpPort = PORT, httpsPort } = {}) {
+  const urls = listLanUrls(protocol === 'https' ? (httpsPort || PORT) : httpPort, protocol)
   const openPaths = urls.map((base) => `${base}/`)
   const familyPaths = urls.map((base) => `${base}/family?invite=${INVITE}`)
+  const apkNote = protocol === 'https'
+    ? `  APK / Vite proxy (plain http): ${listLanUrls(httpPort, 'http').filter((u) => !PUBLIC_URL || u !== PUBLIC_URL).join(', ')}\n`
+    : ''
   const line = '═'.repeat(56)
   const mailNote = mailStoreEnabled()
     ? '  Family /family: Mode B — OTP by email + mailbox store\n'
@@ -102,7 +105,7 @@ ${openPaths.map((u) => `  → ${u}`).join('\n')}
   Optional family messenger (email OTP):
 ${familyPaths.map((u) => `  → ${u}`).join('\n')}
   Invite code: ${INVITE}
-${mailNote}
+${mailNote}${apkNote}
   Self-signed IP links need Advanced → Proceed in the browser.
 ${line}
 `)

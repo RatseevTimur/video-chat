@@ -4,6 +4,8 @@ import { bindSocket, getChat, getSession, lookupUsers, notifyMembers, unbindSock
 import { sendCancelRing, sendChatPush, sendRing } from './push.js'
 
 const users = {}
+/** id → socket state, so a reconnecting tab can take its seat back. */
+const states = {}
 const rooms = {}
 /** roomId → { ringId, from, fromName, at } */
 const activeRings = Object.create(null)
@@ -55,7 +57,8 @@ function getRoomInfo(roomId) {
     participantCount: room.participants.length,
     waiting,
     callActive: Boolean(room.call?.active),
-    inCall: room.call?.inCall || []
+    inCall: room.call?.inCall || [],
+    media: room.media || {}
   }
 }
 
@@ -81,7 +84,8 @@ function emptyRoom(type, hostId) {
     call: { active: false, callerId: null, inCall: [] },
     chat: [],
     chatExpiresAt: 0,
-    deviceIds: Object.create(null)
+    deviceIds: Object.create(null),
+    media: Object.create(null)
   }
 }
 
@@ -152,6 +156,7 @@ function leaveRoom(socketState) {
   room.call.inCall = room.call.inCall.filter((userId) => userId !== id)
   delete room.names[id]
   if (room.deviceIds) delete room.deviceIds[id]
+  if (room.media) delete room.media[id]
 
   if (wasWaiting && !wasParticipant) {
     notifyHostWaiting(currentRoom)
@@ -212,8 +217,38 @@ function ensureId(state, socket) {
   if (state.id) return state.id
   state.id = nanoid(8)
   users[state.id] = socket
+  states[state.id] = state
   socket.emit('init', { id: state.id })
   return state.id
+}
+
+/**
+ * Same tab reconnected (Wi‑Fi blip, background → foreground) before the old socket timed out.
+ * Hand the seat over instead of minting a fresh "Гость" that lingers as a black tile.
+ */
+function adoptSeat(requested, state, socket) {
+  const prevSocket = users[requested]
+  const prev = states[requested]
+  if (prevSocket && prevSocket !== socket && prev) {
+    state.currentRoom = prev.currentRoom
+    state.email = prev.email
+    state.deviceId = prev.deviceId
+    if (prev.deviceId) socket.data.deviceId = prev.deviceId
+    // Detach the stale state so its late 'disconnect' is a no-op.
+    prev.id = null
+    prev.currentRoom = null
+    prev.email = null
+    try { prevSocket.disconnect(true) } catch { /* ignore */ }
+  }
+  state.id = requested
+  users[requested] = socket
+  states[requested] = state
+  const room = state.currentRoom ? rooms[state.currentRoom] : null
+  if (room && room.participants.includes(requested)) {
+    socket.join(state.currentRoom)
+  } else {
+    state.currentRoom = null
+  }
 }
 
 function rateLimit(bucket, key, max, windowMs) {
@@ -235,12 +270,17 @@ export default function initSocket(socket) {
   socket
     .on('init', (data = {}) => {
       const requested = typeof data.id === 'string' && ID_RE.test(data.id) ? data.id : null
-      if (requested && (!users[requested] || users[requested] === socket)) {
-        state.id = requested
-      } else {
+      if (requested) {
+        if (state.id && state.id !== requested) {
+          delete users[state.id]
+          delete states[state.id]
+        }
+        adoptSeat(requested, state, socket)
+      } else if (!state.id) {
         state.id = nanoid(8)
+        users[state.id] = socket
+        states[state.id] = state
       }
-      users[state.id] = socket
       socket.emit('init', { id: state.id })
     })
     .on('createRoom', (data = {}) => {
@@ -333,13 +373,32 @@ export default function initSocket(socket) {
         chat: room.chat || []
       })
     })
-    .on('mediaReady', () => {
+    .on('mediaReady', (data = {}) => {
       const room = rooms[state.currentRoom]
       if (!room || !state.id || !room.participants.includes(state.id)) return
+      // `session` changes when the tab reloads → peers know to rebuild their RTCPeerConnection.
+      const session = typeof data?.session === 'string' ? data.session.slice(0, 16) : ''
       emitToRoom(state.currentRoom, 'peerMediaReady', {
         userId: state.id,
+        session,
         roomInfo: getRoomInfo(state.currentRoom)
       }, socket)
+    })
+    .on('mediaState', (data = {}) => {
+      const room = rooms[state.currentRoom]
+      if (!room || !state.id || !room.participants.includes(state.id)) return
+      if (!room.media) room.media = Object.create(null)
+      const next = { audio: data?.audio !== false, video: data?.video !== false }
+      room.media[state.id] = next
+      emitToRoom(state.currentRoom, 'peerMediaState', { userId: state.id, ...next }, socket)
+    })
+    .on('reaction', (data = {}) => {
+      const room = rooms[state.currentRoom]
+      if (!room || !state.id || !room.participants.includes(state.id)) return
+      if (!rateLimit(limits, 'reaction', 30, 60_000)) return
+      const kind = typeof data?.kind === 'string' ? data.kind.slice(0, 16) : ''
+      if (!/^[a-z]+$/.test(kind)) return
+      emitToRoom(state.currentRoom, 'reaction', { from: state.id, kind }, socket)
     })
     .on('requestJoin', (data = {}) => {
       // Second (nth) attempt after deny — same as knocking again
@@ -510,6 +569,21 @@ export default function initSocket(socket) {
       }
       socket.data.watching = roomId
       socket.join(`watch:${roomId}`)
+
+      // Late watcher while a ring is active → ring them now (phone opened after the call started).
+      const active = activeRings[roomId]
+      const room = rooms[roomId]
+      if (active && room && !room.participants.includes(state.id)) {
+        const inRoomDevices = new Set(Object.values(room.deviceIds || {}).filter(Boolean))
+        if (!deviceId || !inRoomDevices.has(deviceId)) {
+          socket.emit('incomingRing', {
+            roomId,
+            ringId: active.ringId,
+            fromName: active.fromName,
+            from: active.from
+          })
+        }
+      }
     })
     .on('unwatchRoom', (data = {}) => {
       const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
@@ -567,7 +641,10 @@ export default function initSocket(socket) {
         })
         done({
           sent: Math.max(result.sent || 0, online),
+          // reachable = other devices (push subs not in room) + online watchers
+          others: Math.max(result.others || 0, online),
           total: Math.max(result.total || 0, online),
+          participants: room.participants.length,
           pushed: result.sent || 0,
           online,
           ringId
@@ -678,6 +755,9 @@ export default function initSocket(socket) {
     .on('disconnect', () => {
       leaveRoom(state)
       if (state.email) unbindSocket(state.email, socket)
-      if (state.id) delete users[state.id]
+      if (state.id && users[state.id] === socket) {
+        delete users[state.id]
+        delete states[state.id]
+      }
     })
 }

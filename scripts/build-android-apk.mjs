@@ -12,7 +12,6 @@
 import { spawnSync } from 'child_process'
 import {
   copyFileSync,
-  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -71,38 +70,31 @@ if (remoteUi) {
   console.log('Slim embedded shell. API/wasm →', serverUrl)
 }
 
+// The app bundle bakes VITE_SERVER_URL; the web `dist` must NOT (an https page calling
+// http://IP is blocked as mixed content). So the app gets its own output dir.
+const appDist = join(client, 'dist-app')
+config.webDir = 'dist-app'
 writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
 
-run('yarn', ['build'], client, {
+rmSync(appDist, { recursive: true, force: true })
+run('yarn', ['build', '--outDir', 'dist-app', '--emptyOutDir'], client, {
   ...process.env,
   VITE_SERVER_URL: serverUrl
 })
+// Slim: wasm + apk are served by the server, not embedded.
+rmSync(join(appDist, 'mediapipe'), { recursive: true, force: true })
+rmSync(join(appDist, 'models'), { recursive: true, force: true })
+rmSync(join(appDist, 'downloads'), { recursive: true, force: true })
 
-// Slim assets copied into the APK (server dist keeps full mediapipe below).
-const slimMediapipe = join(dist, 'mediapipe')
-const slimDownloads = join(dist, 'downloads')
-const backupMediapipe = join(client, '.apk-mediapipe-backup')
-if (existsSync(slimMediapipe)) {
-  rmSync(backupMediapipe, { recursive: true, force: true })
-  cpSync(slimMediapipe, backupMediapipe, { recursive: true })
-  rmSync(slimMediapipe, { recursive: true, force: true })
-}
-rmSync(slimDownloads, { recursive: true, force: true })
-// Drop old broken mask PNGs if somehow still present — procedural masks need no images.
-;['Mask.png', 'glasses.png', 'sunglasses.png'].forEach((name) => {
-  // hashed names live in assets/; nothing to do
-})
-
-if (!existsSync(android)) {
-  run('npx', ['cap', 'add', 'android'], client)
-} else {
-  run('npx', ['cap', 'sync', 'android'], client)
-}
-
-// Restore mediapipe into dist so the running server can still serve wasm to the APK.
-if (existsSync(backupMediapipe)) {
-  cpSync(backupMediapipe, slimMediapipe, { recursive: true })
-  rmSync(backupMediapipe, { recursive: true, force: true })
+try {
+  if (!existsSync(android)) {
+    run('npx', ['cap', 'add', 'android'], client)
+  } else {
+    run('npx', ['cap', 'sync', 'android'], client)
+  }
+} finally {
+  config.webDir = 'dist'
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`)
 }
 
 if (!process.env.ANDROID_HOME && !process.env.ANDROID_SDK_ROOT) {
@@ -131,8 +123,10 @@ if (!existsSync(built)) {
 
 mkdirSync(outDir, { recursive: true })
 copyFileSync(built, apkOut)
-mkdirSync(join(dist, 'downloads'), { recursive: true })
-copyFileSync(built, join(dist, 'downloads', 'video-chat.apk'))
+if (existsSync(dist)) {
+  mkdirSync(join(dist, 'downloads'), { recursive: true })
+  copyFileSync(built, join(dist, 'downloads', 'video-chat.apk'))
+}
 
 const mb = (readFileSync(apkOut).byteLength / (1024 * 1024)).toFixed(1)
 console.log(`\nAPK ready: ${apkOut} (${mb} MB)`)

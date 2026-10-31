@@ -29,12 +29,15 @@ import {
 import { createRingback } from '../utils/ringtone'
 import { goAppBack } from '../utils/appNav'
 import { familyRoom, rememberRoom } from '../utils/rooms'
-import { getStoredId, getStoredName } from '../utils/session'
+import { trackingEnabled } from '../utils/prefs'
+import { getStoredId, getStoredName, randomId } from '../utils/session'
 import socket from '../utils/socket'
+import { watchSpeaking } from '../utils/voice'
+import EffectsPanel from './EffectsPanel'
 import InCallChat from './InCallChat'
 import InstallHint from './InstallHint'
-import MaskPicker from './MaskPicker'
 import PeerTile from './PeerTile'
+import ReactionBurst, { REACTION_MS, REACTIONS } from './ReactionBurst'
 
 function shouldOffer(localId, remoteId) {
   return String(localId) < String(remoteId)
@@ -42,6 +45,23 @@ function shouldOffer(localId, remoteId) {
 
 function shouldRestart(pc) {
   return ['failed', 'disconnected', 'closed'].includes(pc?.connectionState)
+}
+
+const FX_KEY = 'vc-fx'
+function loadFx() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(FX_KEY) || '{}')
+    return {
+      mask: typeof saved.mask === 'string' ? saved.mask : 'none',
+      background: typeof saved.background === 'string' ? saved.background : 'none',
+      gestures: saved.gestures !== false
+    }
+  } catch {
+    return { mask: 'none', background: 'none', gestures: true }
+  }
+}
+function saveFx(fx) {
+  try { localStorage.setItem(FX_KEY, JSON.stringify(fx)) } catch { /* ignore */ }
 }
 
 const Room = () => {
@@ -52,7 +72,12 @@ const Room = () => {
   const [roomInfo, setRoomInfo] = useState(null)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
-  const [maskId, setMaskId] = useState('none')
+  const [maskId, setMaskId] = useState(() => loadFx().mask)
+  const [background, setBackground] = useState(() => loadFx().background)
+  const [gestures, setGestures] = useState(() => loadFx().gestures)
+  const [peerMedia, setPeerMedia] = useState({})
+  const [reactions, setReactions] = useState({})
+  const [localSpeaking, setLocalSpeaking] = useState(false)
   const [videoOn, setVideoOn] = useState(true)
   const [audioOn, setAudioOn] = useState(true)
   const [mediaReady, setMediaReady] = useState(false)
@@ -70,8 +95,11 @@ const Room = () => {
   const [ringing, setRinging] = useState(false)
   const [activeRingId, setActiveRingId] = useState('')
   const [ringTargets, setRingTargets] = useState(0)
+  const [link, setLink] = useState(socket.connected ? 'connecting' : 'offline')
+  const [linkSlow, setLinkSlow] = useState(false)
   const ringbackRef = useRef(null)
   const leaveRoomTimerRef = useRef(null)
+  const previewGenRef = useRef(0)
   const stopRingbackRef = useRef(() => {})
   const flashNoteRef = useRef(() => {})
 
@@ -89,8 +117,18 @@ const Room = () => {
   const messagesRef = useRef([])
   const chatOpenRef = useRef(false)
   const facingRef = useRef('user')
-  const maskIdRef = useRef('none')
+  const maskIdRef = useRef(loadFx().mask)
+  const fxRef = useRef(loadFx())
+  const fireReactionRef = useRef(() => {})
+  const showReactionRef = useRef(() => {})
+  const stopLocalMeterRef = useRef(() => {})
+  const reactionTimersRef = useRef(new Map())
+  const audioOnRef = useRef(true)
+  const videoOnRef = useRef(true)
   const gridRef = useRef(null)
+  // Per-mount media session token; peers use it to detect our reload (see peerMediaReady).
+  const sessionRef = useRef(randomId(10))
+  const peerSessionRef = useRef(new Map())
 
   const displayName = useCallback((id) => roomInfoRef.current?.names?.[id] || id, [])
 
@@ -153,6 +191,10 @@ const Room = () => {
   const bindComposer = useCallback(async (raw) => {
     if (!engineRef.current) engineRef.current = new MaskEngine()
     const engine = engineRef.current
+    if (window.__vcSocket) { // debug hooks (same opt-in as the socket)
+      window.__vcEngine = engine
+      window.__vcPeers = peersRef.current
+    }
     engine.onSize = (w, h, stream) => {
       rememberAspect('local', w, h)
       const video = stream?.getVideoTracks?.()[0]
@@ -169,6 +211,10 @@ const Room = () => {
     }
     await engine.init()
     await engine.setMask(maskIdRef.current)
+    engine.onGesture = (kind) => fireReactionRef.current(kind)
+    engine.setBackground(fxRef.current.background).catch(() => {})
+    engine.setGestures(fxRef.current.gestures).catch(() => {})
+    engine.setTracking(trackingEnabled())
     if (localCanvas.current) engine.attach({ stream: raw, canvas: localCanvas.current })
     const canvasStream = engine.getStream(24)
     const settings = raw.getVideoTracks()[0]?.getSettings?.() || {}
@@ -259,64 +305,88 @@ const Room = () => {
   }, [closePeer, ensurePeer])
 
   useEffect(() => {
+    const join = () => {
+      socket.emit('joinRoom', { roomId, name: getStoredName() || 'Гость', deviceId: getDeviceId() })
+    }
+    // `init` arrives on every (re)connect (see utils/socket.js) → always re-take our seat.
     const onInit = ({ id }) => {
       setLocalId(id)
       localIdRef.current = id
-      try { sessionStorage.setItem('vc-id', id) } catch { /* ignore */ }
-      socket.emit('joinRoom', { roomId, name: getStoredName() || 'Гость', deviceId: getDeviceId() })
+      join()
     }
 
-    socket
-      .on('init', onInit)
-      .on('roomJoined', ({ roomInfo: info, chat }) => {
+    const handlers = {
+      init: onInit,
+      roomJoined: ({ roomInfo: info, chat }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
+        setLink('online')
         if (Array.isArray(chat)) setChat(chat)
-        setError('')
+        // Keep a camera error visible; clear stale room errors.
+        setError((prev) => (mediaReadyRef.current ? '' : prev))
+        if (info?.media) setPeerMedia(info.media)
         meshWith(info?.participants)
-      })
-      .on('roomError', ({ message }) => {
+        if (mediaReadyRef.current) {
+          socket.emit('mediaReady', { session: sessionRef.current })
+          socket.emit('mediaState', { audio: audioOnRef.current, video: videoOnRef.current })
+        }
+      },
+      peerMediaState: ({ userId, audio, video }) => {
+        if (!userId) return
+        setPeerMedia((prev) => ({ ...prev, [userId]: { audio: audio !== false, video: video !== false } }))
+      },
+      reaction: ({ from, kind }) => {
+        if (from && REACTIONS[kind]) showReactionRef.current(from, kind)
+      },
+      roomError: ({ message }) => {
         setError(message)
         if (String(message).toLowerCase().includes('не найдена') || String(message).toLowerCase().includes('not found')) {
           goAppBack(navigate)
         }
-      })
-      .on('userJoined', ({ roomInfo: info, userId }) => {
+      },
+      userJoined: ({ roomInfo: info, userId }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
         meshWith(info?.participants)
         if (userId) ensurePeer(userId)
-      })
-      .on('userLeft', ({ roomInfo: info, userId }) => {
+      },
+      userLeft: ({ roomInfo: info, userId }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
         if (userId) {
           queueRef.current.delete(userId)
           closePeer(userId)
         }
-      })
-      .on('hostChanged', ({ roomInfo: info }) => {
+      },
+      hostChanged: ({ roomInfo: info }) => {
         roomInfoRef.current = info
         setRoomInfo(info)
-      })
-      .on('peerMediaReady', ({ userId, roomInfo: info }) => {
+      },
+      peerMediaReady: ({ userId, session, roomInfo: info }) => {
         if (info) {
           roomInfoRef.current = info
           setRoomInfo(info)
         }
         if (!userId || userId === localIdRef.current) return
         const existing = peersRef.current.get(userId)
-        ensurePeer(userId, { restart: Boolean(existing && !existing.pending && shouldRestart(existing)) })
-      })
-      .on('chatMessage', ({ message }) => addMessage(message))
-      .on('ringDeclined', ({ name }) => {
+        // Peer reloaded/reconnected with a new media session → its old RTCPeerConnection is dead
+        // on their side; rebuild ours instead of leaving a frozen black tile.
+        const known = peerSessionRef.current.get(userId)
+        const fresh = Boolean(session && known && known !== session)
+        if (session) peerSessionRef.current.set(userId, session)
+        ensurePeer(userId, {
+          restart: Boolean(existing && !existing.pending && (fresh || shouldRestart(existing)))
+        })
+      },
+      chatMessage: ({ message }) => addMessage(message),
+      ringDeclined: ({ name }) => {
         setRinging(false)
         setActiveRingId('')
         setRingTargets(0)
         stopRingbackRef.current()
         flashNoteRef.current(`${name || 'Участник'} отклонил звонок`)
-      })
-      .on('call', async (data) => {
+      },
+      call: async (data) => {
         const from = data?.from
         if (!from || from === localIdRef.current) return
         const queued = queueRef.current.get(from) || []
@@ -326,21 +396,22 @@ const Room = () => {
           await ensurePeer(from)
           flushQueue(from)
         }
-      })
+      },
+      disconnect: () => setLink('offline'),
+      connect_error: () => setLink('offline')
+    }
+    Object.entries(handlers).forEach(([event, fn]) => socket.on(event, fn))
 
-    const boot = () => socket.emit('init', { id: getStoredId() })
-    if (socket.connected) boot()
-    else socket.once('connect', boot)
+    // Already connected → no `init` event will come; claim the seat ourselves.
+    if (socket.connected) socket.emit('init', { id: getStoredId() })
+    else setLink('offline')
 
     // StrictMode remounts quickly — defer leave so the second mount can cancel it.
     let leaveTimer = null
     return () => {
       closeAllPeers()
       leaveTimer = setTimeout(() => socket.emit('leaveRoom'), 600)
-      ;['init', 'roomJoined', 'roomError', 'userJoined', 'userLeft', 'hostChanged', 'peerMediaReady', 'chatMessage', 'call', 'ringDeclined']
-        .forEach((ev) => socket.off(ev))
-      rawStreamRef.current?.getTracks().forEach((track) => track.stop())
-      engineRef.current?.dispose()
+      Object.entries(handlers).forEach(([event, fn]) => socket.off(event, fn))
       // Cancel deferred leave if this cleanup is from StrictMode remount.
       // (A new effect for the same roomId will clear this via the ref below.)
       if (leaveRoomTimerRef.current) clearTimeout(leaveRoomTimerRef.current)
@@ -348,38 +419,133 @@ const Room = () => {
     }
   }, [roomId, navigate, meshWith, ensurePeer, closePeer, closeAllPeers, flushQueue, addMessage])
 
-  useEffect(() => {
-    if (!roomInfo || roomInfo.type === 'text') return undefined
-    let cancelled = false
+  const startPreview = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError(window.isSecureContext
+        ? 'Браузер не поддерживает камеру'
+        : `Камера недоступна по http. Откройте https://${window.location.hostname}:4443 или http://localhost:4000`)
+      return false
+    }
+    // Only the latest request may win (StrictMode double-mount, quick camera flips).
+    const gen = ++previewGenRef.current
+    const stale = () => gen !== previewGenRef.current
+    try {
+      const stream = await openCamera(facingRef.current)
+      if (stale()) {
+        stream.getTracks().forEach((track) => track.stop())
+        return false
+      }
+      rawStreamRef.current?.getTracks().forEach((track) => track.stop())
+      rawStreamRef.current = stream
+      await bindComposer(stream)
+      if (stale()) return false
+      mediaReadyRef.current = true
+      setMediaReady(true)
+      setError('')
+      socket.emit('mediaReady', { session: sessionRef.current })
+      socket.emit('mediaState', { audio: audioOnRef.current, video: videoOnRef.current })
+      meshWith(roomInfoRef.current?.participants)
+      stopLocalMeterRef.current()
+      stopLocalMeterRef.current = watchSpeaking(stream, setLocalSpeaking)
 
-    const startPreview = async () => {
       try {
-        const stream = await openCamera(facingRef.current)
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop())
-          return
-        }
-        rawStreamRef.current = stream
-        await bindComposer(stream)
-        mediaReadyRef.current = true
-        setMediaReady(true)
-        socket.emit('mediaReady')
-        meshWith(roomInfoRef.current?.participants)
-
-        try {
-          const devices = await navigator.mediaDevices.enumerateDevices()
-          const cams = devices.filter((item) => item.kind === 'videoinput').length
-          setCanFlip(cams > 1 || ('ontouchstart' in window))
-        } catch { /* ignore */ }
-      } catch (err) {
-        console.error(err)
+        const devices = await navigator.mediaDevices.enumerateDevices()
+        const cams = devices.filter((item) => item.kind === 'videoinput').length
+        setCanFlip(cams > 1 || ('ontouchstart' in window))
+      } catch { /* ignore */ }
+      return true
+    } catch (err) {
+      console.error('camera', err)
+      const name = err?.name || ''
+      if (name === 'NotAllowedError' || name === 'SecurityError') {
+        setError('Нужен доступ к камере и микрофону — нажмите «Разрешить» в браузере')
+      } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        setError('Камера или микрофон не найдены')
+      } else if (name === 'NotReadableError') {
+        setError('Камера занята другим приложением')
+      } else {
         setError('Нужен доступ к камере и микрофону / Allow camera and microphone')
       }
+      return false
     }
+  }, [bindComposer, meshWith])
 
+  // Ask for camera/mic right away (don't wait for the server) — users must see the prompt instantly.
+  useEffect(() => {
     startPreview()
-    return () => { cancelled = true }
-  }, [roomInfo?.type, roomId, meshWith, bindComposer])
+    return () => {
+      previewGenRef.current += 1 // invalidate any in-flight getUserMedia
+      mediaReadyRef.current = false
+      stopLocalMeterRef.current()
+      rawStreamRef.current?.getTracks().forEach((track) => track.stop())
+      rawStreamRef.current = null
+      engineRef.current?.dispose()
+      engineRef.current = null
+      outboundRef.current = null
+    }
+  }, [roomId, startPreview])
+
+  // Lobby settings → apply face-follow crop without remounting the room.
+  useEffect(() => {
+    const apply = (on) => engineRef.current?.setTracking(on !== false)
+    const onCustom = (event) => apply(event.detail?.on)
+    const onStorage = (event) => {
+      if (event.key === 'vc-tracking') apply(event.newValue !== '0' && event.newValue !== 'false')
+    }
+    window.addEventListener('vc-tracking', onCustom)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      window.removeEventListener('vc-tracking', onCustom)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [])
+
+  // Hidden tab: rAF stops → canvas track freezes. Send the raw camera track instead
+  // (unless a virtual background is on — then privacy wins and we keep the slow canvas loop).
+  useEffect(() => {
+    const onVisibility = () => {
+      const hidden = document.visibilityState === 'hidden'
+      const engine = engineRef.current
+      engine?.setHidden(hidden)
+      const raw = rawStreamRef.current?.getVideoTracks()[0]
+      const composed = engine?.outputStream?.getVideoTracks()[0]
+      if (hidden && fxRef.current.background === 'none' && raw) pushVideoTrack(raw)
+      else if (!hidden && composed) pushVideoTrack(composed)
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [pushVideoTrack])
+
+  // Reactions: local burst + broadcast; remote bursts arrive via socket.
+  showReactionRef.current = (peerId, kind) => {
+    const nonce = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    setReactions((prev) => ({ ...prev, [peerId]: { kind, nonce } }))
+    const timers = reactionTimersRef.current
+    window.clearTimeout(timers.get(peerId))
+    timers.set(peerId, window.setTimeout(() => {
+      setReactions((prev) => {
+        if (prev[peerId]?.nonce !== nonce) return prev
+        const next = { ...prev }
+        delete next[peerId]
+        return next
+      })
+    }, REACTION_MS))
+  }
+  fireReactionRef.current = (kind) => {
+    if (!REACTIONS[kind]) return
+    showReactionRef.current('local', kind)
+    socket.emit('reaction', { kind })
+  }
+
+  // "Connecting…" that never resolves is the worst UX; surface it.
+  useEffect(() => {
+    if (link === 'online') return undefined
+    const timer = window.setTimeout(() => setLinkSlow(true), 5000)
+    return () => {
+      window.clearTimeout(timer)
+      setLinkSlow(false)
+    }
+  }, [link])
 
   useEffect(() => {
     if (mediaReady && roomInfo?.participants) meshWith(roomInfo.participants)
@@ -458,7 +624,27 @@ const Room = () => {
   const changeMask = async (id) => {
     maskIdRef.current = id
     setMaskId(id)
+    fxRef.current = { ...fxRef.current, mask: id }
+    saveFx(fxRef.current)
     await engineRef.current?.setMask(id)
+  }
+
+  const changeBackground = async (id) => {
+    setBackground(id)
+    fxRef.current = { ...fxRef.current, background: id }
+    saveFx(fxRef.current)
+    const applied = await engineRef.current?.setBackground(id)
+    if (applied && applied !== id) {
+      setBackground(applied)
+      fxRef.current = { ...fxRef.current, background: applied }
+    }
+  }
+
+  const changeGestures = async (on) => {
+    setGestures(on)
+    fxRef.current = { ...fxRef.current, gestures: on }
+    saveFx(fxRef.current)
+    await engineRef.current?.setGestures(on)
   }
 
   const flipCamera = async () => {
@@ -488,15 +674,19 @@ const Room = () => {
   const toggleVideo = () => {
     const next = !videoOn
     setVideoOn(next)
+    videoOnRef.current = next
     rawStreamRef.current?.getVideoTracks().forEach((track) => { track.enabled = next })
     outboundRef.current?.getVideoTracks().forEach((track) => { track.enabled = next })
+    socket.emit('mediaState', { audio: audioOnRef.current, video: next })
   }
 
   const toggleAudio = () => {
     const next = !audioOn
     setAudioOn(next)
+    audioOnRef.current = next
     rawStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = next })
     outboundRef.current?.getAudioTracks().forEach((track) => { track.enabled = next })
+    socket.emit('mediaState', { audio: next, video: videoOnRef.current })
   }
 
   const stopRingback = () => {
@@ -643,21 +833,31 @@ const Room = () => {
         flashNote('Подождите…')
         return
       }
-      // Keep ringback for the full server window (45s) even if nobody is subscribed yet —
-      // otherwise phones looked like the call "instantly reset".
-      setActiveRingId(res?.ringId || '')
-      setRingTargets(res?.sent || 0)
-      if (!res?.total) {
-        flashNote('На другом телефоне откройте этот чат и включите уведомления')
+      if (res?.error) {
+        setRinging(false)
+        stopRingback()
+        flashNote('Не удалось позвонить — попробуйте ещё раз')
         return
       }
-      if (!res.sent) {
+      // Ring stays active on the server for 45s; anyone who opens the app meanwhile gets it.
+      setActiveRingId(res?.ringId || '')
+      const others = Number(res?.others || 0)
+      const participants = Number(res?.participants || 1)
+      setRingTargets(others)
+      if (others > 0) {
+        flashNote(`Звоним · ${others}`)
+        return
+      }
+      if (participants > 1) {
+        // Everyone we know about is already here.
         setRinging(false)
         stopRingback()
         flashNote('Все уже в комнате')
         return
       }
-      flashNote(`Звоним · ${res.sent}`)
+      // Alone and nobody else has enabled alerts for this room yet — keep ringing,
+      // and tell the user what to do on the other phone.
+      flashNote('Звоним… На другом телефоне откройте эту комнату и нажмите 🔔 — звонок дойдёт')
     })
   }
 
@@ -720,12 +920,26 @@ const Room = () => {
 
       <InstallHint compact floating />
       {callNote && !ringing && <div className="toast-note toast-note-float">{callNote}</div>}
+      {link !== 'online' && linkSlow && !error && (
+        <div className="toast-note toast-note-float toast-error">
+          {link === 'offline' ? 'Нет связи с сервером — переподключаемся…' : 'Подключаемся к комнате…'}
+          <button type="button" className="btn btn-small" onClick={() => { socket.connect(); socket.emit('init', { id: getStoredId() }) }}>
+            Повторить
+          </button>
+        </div>
+      )}
       {error && (
         <div className="toast-note toast-note-float toast-error">
           {error}
-          <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
-            Повторить
-          </button>
+          {!mediaReady && navigator.mediaDevices?.getUserMedia ? (
+            <button type="button" className="btn btn-small" onClick={() => startPreview()}>
+              Разрешить камеру
+            </button>
+          ) : (
+            <button type="button" className="btn btn-small" onClick={() => window.location.reload()}>
+              Повторить
+            </button>
+          )}
         </div>
       )}
 
@@ -739,7 +953,7 @@ const Room = () => {
               feature: layout.featureId === 'local',
               rail: layout.mode === 'spotlight' && layout.featureId !== 'local',
               pressable
-            })}`}
+            })} ${localSpeaking && audioOn ? 'is-speaking' : ''}`}
             onClick={pressable ? () => togglePin('local') : undefined}
             onKeyDown={pressable ? (event) => {
               if (event.key === 'Enter' || event.key === ' ') {
@@ -761,6 +975,11 @@ const Room = () => {
             />
             <canvas ref={localCanvas} className="mask-canvas-hidden" />
             {!videoOn && <div className="meet-tile-empty">{(getStoredName() || 'Вы').slice(0, 1)}</div>}
+            {reactions.local && <ReactionBurst kind={reactions.local.kind} nonce={reactions.local.nonce} />}
+            <div className="tile-badges">
+              {!audioOn && <span className="tile-badge"><BsMicMuteFill /></span>}
+              {!videoOn && <span className="tile-badge"><BsCameraVideoOff /></span>}
+            </div>
             <span className="video-label">Вы</span>
           </div>
 
@@ -769,7 +988,9 @@ const Room = () => {
               key={id}
               stream={remoteStreams[id]}
               name={displayName(id)}
-              videoOff={!remoteStreams[id]}
+              videoOff={!remoteStreams[id] || peerMedia[id]?.video === false}
+              micOff={peerMedia[id]?.audio === false}
+              reaction={reactions[id] || null}
               aspect={aspects[id] || 'landscape'}
               pinned={layout.pinnedId === id}
               feature={layout.featureId === id}
@@ -816,7 +1037,15 @@ const Room = () => {
               <MdFlipCameraIos />
             </button>
           )}
-          <MaskPicker value={maskId} onChange={changeMask} disabled={!mediaReady} />
+          <EffectsPanel
+            mask={maskId}
+            onMask={changeMask}
+            background={background}
+            onBackground={changeBackground}
+            gestures={gestures}
+            onGestures={changeGestures}
+            disabled={!mediaReady}
+          />
           <button
             type="button"
             className={`ctrl ${chatOpen ? 'ctrl-on' : ''}`}

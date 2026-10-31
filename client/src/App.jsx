@@ -19,12 +19,12 @@ import MaskModule from './components/MaskModule'
 import Messenger from './components/Messenger'
 import Room from './components/Room'
 import RoomManager from './components/RoomManager'
-import { enterRoom, goAppBack, parentPath, resolveTreeBack } from './utils/appNav'
+import { enterRoom, goAppBack, resolveTreeBack } from './utils/appNav'
 import { isNativeApp } from './utils/native'
 import PeerConnection from './utils/PeerConnection'
 import { resubscribeSaved, watchSavedRooms } from './utils/push'
 import { createRingtone, startVibrate, stopVibrate } from './utils/ringtone'
-import { getStoredId, getStoredName } from './utils/session'
+import { getStoredName } from './utils/session'
 import socket from './utils/socket'
 import { bumpUnread } from './utils/unread'
 import './styles/app.scss'
@@ -47,7 +47,9 @@ function TreeBackGuard() {
     }
 
     const prev = prevRef.current
-    if (navType === 'POP' && !snappingRef.current) {
+    // Same location as before (StrictMode double-run, hash-only change) → not a real Back.
+    const moved = prev.pathname !== location.pathname || prev.search !== location.search
+    if (navType === 'POP' && moved && !snappingRef.current) {
       const snapTo = resolveTreeBack(prev, location)
       if (snapTo != null) {
         snappingRef.current = true
@@ -243,17 +245,14 @@ export default function App() {
   }, [incoming])
 
   useEffect(() => {
-    socket.emit('init', { id: getStoredId() })
-    socket.on('init', ({ id }) => {
-      try { sessionStorage.setItem('vc-id', id) } catch { /* ignore */ }
-    })
-    socket.on('request', ({ from }) => {
+    // socket.js re-sends `init` on every connect; here only legacy 1:1 call requests.
+    const onRequest = ({ from }) => {
       setCallFrom(from)
       setShowModal(true)
-    })
+    }
+    socket.on('request', onRequest)
     return () => {
-      socket.off('init')
-      socket.off('request')
+      socket.off('request', onRequest)
     }
   }, [])
 

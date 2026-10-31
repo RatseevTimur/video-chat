@@ -1,7 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { BsCameraVideoOff, BsMicMuteFill } from 'react-icons/bs'
 
 import { aspectOf } from '../utils/camera'
 import { tileClass } from '../utils/gridLayout'
+import { watchSpeaking } from '../utils/voice'
+import ReactionBurst from './ReactionBurst'
 
 function PeerTile({
   stream,
@@ -9,11 +12,13 @@ function PeerTile({
   muted = false,
   mirror = false,
   videoOff = false,
+  micOff = false,
   aspect = 'landscape',
   pinned = false,
   feature = false,
   rail = false,
   pressable = false,
+  reaction = null,
   onClick,
   onAspect
 }) {
@@ -21,6 +26,7 @@ function PeerTile({
   const aspectRef = useRef('')
   const onAspectRef = useRef(onAspect)
   onAspectRef.current = onAspect
+  const [speaking, setSpeaking] = useState(false)
 
   useEffect(() => {
     const el = videoRef.current
@@ -43,14 +49,24 @@ function PeerTile({
       el.removeEventListener('resize', report)
       el.srcObject = null
     }
+  }, [stream, videoOff])
+
+  // Remote audio keeps flowing even when the <video> is hidden → meter on the stream itself.
+  useEffect(() => {
+    if (!stream) {
+      setSpeaking(false)
+      return undefined
+    }
+    return watchSpeaking(stream, setSpeaking)
   }, [stream])
 
   const letter = (name || '?').slice(0, 1).toUpperCase()
   const label = pinned ? 'Убрать увеличение / Unpin' : 'Увеличить / Pin'
+  const showVideo = Boolean(stream) && !videoOff
 
   return (
     <div
-      className={tileClass({ off: videoOff || !stream, aspect, pinned, feature, rail, pressable })}
+      className={`${tileClass({ off: !showVideo, aspect, pinned, feature, rail, pressable })} ${speaking && !micOff ? 'is-speaking' : ''}`}
       onClick={pressable ? onClick : undefined}
       onKeyDown={pressable ? (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -63,11 +79,20 @@ function PeerTile({
       aria-pressed={pressable ? pinned : undefined}
       title={pressable ? label : undefined}
     >
-      {stream && !videoOff ? (
-        <video ref={videoRef} autoPlay playsInline muted={muted} className={mirror ? 'mirror' : ''} />
-      ) : (
-        <div className="meet-tile-empty">{letter}</div>
-      )}
+      {/* Keep the element mounted while video is off so audio keeps playing. */}
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted={muted}
+        className={`${mirror ? 'mirror' : ''} ${showVideo ? '' : 'is-hidden'}`}
+      />
+      {!showVideo && <div className="meet-tile-empty">{letter}</div>}
+      {reaction && <ReactionBurst kind={reaction.kind} nonce={reaction.nonce} />}
+      <div className="tile-badges">
+        {micOff && <span className="tile-badge" title="Микрофон выключен"><BsMicMuteFill /></span>}
+        {videoOff && <span className="tile-badge" title="Камера выключена"><BsCameraVideoOff /></span>}
+      </div>
       <span className="video-label">{name}</span>
     </div>
   )

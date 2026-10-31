@@ -23,6 +23,29 @@ const behindProxy = process.env.RENDER === 'true' || process.env.FORCE_HTTP === 
 if (behindProxy) app.set('trust proxy', 1)
 
 app.disable('x-powered-by')
+
+const HTTPS_PORT = Number(process.env.HTTPS_PORT || 4443)
+let httpsReady = false
+
+function isLocalHost(host = '') {
+  const name = String(host).replace(/:\d+$/, '').replace(/^\[|\]$/g, '')
+  return name === 'localhost' || name === '127.0.0.1' || name === '::1'
+}
+
+// Browsers on http://192.168.x.x can't open the camera (not a secure context).
+// Send page navigations to the HTTPS twin; API/socket stay on HTTP for the APK.
+app.use((req, res, next) => {
+  if (!httpsReady || req.secure || req.method !== 'GET') return next()
+  // Already TLS at a tunnel/proxy (cloudflared → http://127.0.0.1:PORT).
+  if (String(req.headers['x-forwarded-proto'] || '').includes('https')) return next()
+  if (req.path.startsWith('/api') || req.path.startsWith('/socket.io')) return next()
+  if (!String(req.headers.accept || '').includes('text/html')) return next()
+  const host = req.headers.host || ''
+  if (isLocalHost(host)) return next()
+  const name = host.replace(/:\d+$/, '')
+  res.redirect(302, `https://${name}:${HTTPS_PORT}${req.originalUrl}`)
+})
+
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.setHeader('Referrer-Policy', 'no-referrer')
@@ -86,19 +109,17 @@ app.get('*', (req, res, next) => {
   res.sendFile(join(__dirname, '../client/dist/index.html'))
 })
 
-let server
-let protocol = 'https'
-if (behindProxy) {
-  server = createHttpServer(app)
-  protocol = 'http'
-} else {
+// One process, two listeners:
+//   http://0.0.0.0:PORT        — APK (cleartext API), Vite proxy, localhost browsers
+//   https://0.0.0.0:HTTPS_PORT — LAN browsers (camera needs a secure context)
+// Behind Render's proxy only HTTP is started.
+const server = createHttpServer(app)
+let httpsServer = null
+if (!behindProxy) {
   try {
-    const tls = ensureTls()
-    server = createHttpsServer(tls, app)
+    httpsServer = createHttpsServer(ensureTls(), app)
   } catch (error) {
-    console.warn('HTTPS unavailable (openssl?), falling back to HTTP:', error.message)
-    server = createHttpServer(app)
-    protocol = 'http'
+    console.warn('HTTPS unavailable (openssl?), HTTP only:', error.message)
   }
 }
 
@@ -106,6 +127,7 @@ const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   serveClient: false
 })
+if (httpsServer) io.attach(httpsServer)
 
 io.on('connection', initSocket)
 
@@ -114,6 +136,22 @@ if (behindProxy && !existsSync(distIndex)) {
   process.exit(1)
 }
 
+server.on('error', (error) => {
+  console.error(`HTTP :${port} failed — ${error.code}. Is another server already running?`)
+  process.exit(1)
+})
+
 server.listen(port, '0.0.0.0', () => {
-  printBanner(protocol)
+  if (!httpsServer) {
+    printBanner('http', { httpPort: port })
+    return
+  }
+  httpsServer.on('error', (error) => {
+    console.warn(`HTTPS :${HTTPS_PORT} failed — ${error.code}. Continuing HTTP only.`)
+    printBanner('http', { httpPort: port })
+  })
+  httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
+    httpsReady = true
+    printBanner('https', { httpPort: port, httpsPort: HTTPS_PORT })
+  })
 })

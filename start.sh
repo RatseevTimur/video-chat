@@ -125,20 +125,20 @@ cleanup() {
   [ -n "${TUNNEL_PID:-}" ] && kill "$TUNNEL_PID" 2>/dev/null || true
   kill "$SERVER_PID" 2>/dev/null || true
   # orphaned children from restart loop
-  pkill -f "cloudflared tunnel --url https://127.0.0.1:${PORT}" 2>/dev/null || true
+  pkill -f "cloudflared tunnel --url http://127.0.0.1:${PORT}" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-# Wait until HTTPS answers (self-signed ok)
+# Wait until the HTTP listener answers (HTTPS twin is on 4443)
 for _ in $(seq 1 40); do
-  curl -sk "https://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 && break
+  curl -s "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1 && break
   sleep 0.25
 done
 
 publish_url() {
   local PUBLIC="$1"
   printf '%s\n' "$PUBLIC" > public-url.txt
-  curl -sk -X POST "https://127.0.0.1:${PORT}/api/runtime/public-url" \
+  curl -s -X POST "http://127.0.0.1:${PORT}/api/runtime/public-url" \
     -H 'Content-Type: application/json' \
     -d "{\"invite\":\"${INVITE}\",\"url\":\"${PUBLIC}\"}" >/dev/null 2>&1 || true
   OPEN_ROOM="${OPEN_ROOM:-$(openssl rand -hex 4)}"
@@ -165,7 +165,7 @@ if [ -n "$BIN" ] && [ "${TUNNEL:-1}" = "1" ]; then
   # Keep tunnel alive: if cloudflared dies, URL dies (NXDOMAIN)
   (
     while kill -0 "$SERVER_PID" 2>/dev/null; do
-      "$BIN" tunnel --url "https://127.0.0.1:${PORT}" --no-tls-verify >>"$LOG" 2>&1 &
+      "$BIN" tunnel --url "http://127.0.0.1:${PORT}" >>"$LOG" 2>&1 &
       CF_PID=$!
       echo "$CF_PID" > tunnel.pid
       # wait for hostname once per process

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { BsBell, BsGear, BsPhone, BsX } from 'react-icons/bs'
 
 import { isNativeApp } from '../utils/native'
+import { setTrackingEnabled, trackingEnabled } from '../utils/prefs'
 import {
   armCallsFromGesture,
   canPromptInstall,
@@ -27,6 +28,7 @@ const AppSettings = () => {
   const [sound, setSound] = useState(null)
   const [installable, setInstallable] = useState(() => canPromptInstall())
   const [apkOk, setApkOk] = useState(null)
+  const [tracking, setTracking] = useState(() => trackingEnabled())
 
   const native = isNativeApp()
   const standalone = isStandalone()
@@ -108,6 +110,24 @@ const AppSettings = () => {
             </header>
 
             <p className="settings-mode">{modeLabel}</p>
+
+            <div className="settings-block">
+              <label className="effects-toggle">
+                <input
+                  type="checkbox"
+                  checked={tracking}
+                  onChange={(event) => {
+                    const on = event.target.checked
+                    setTracking(on)
+                    setTrackingEnabled(on)
+                  }}
+                />
+                Режим слежения за лицом
+              </label>
+              <p className="settings-hint">
+                Камера мягко кадрирует лицо в кадре. Выключите, если нужен полный обзор комнаты.
+              </p>
+            </div>
 
             {native && (
               <p className="settings-hint">

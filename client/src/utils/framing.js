@@ -2,6 +2,23 @@ export function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value))
 }
 
+let trackSeq = 0
+
+/** Keypoints (normalized) smoothed per track — positions fast, so masks don't lag; sizes slower. */
+function blendPoints(prev, pts, alpha) {
+  if (!pts) return prev || null
+  if (!prev) return { ...pts }
+  const out = {}
+  for (const key of Object.keys(pts)) {
+    const p = pts[key]
+    const q = prev[key]
+    out[key] = p && q
+      ? { x: q.x + (p.x - q.x) * alpha, y: q.y + (p.y - q.y) * alpha }
+      : (p || q || null)
+  }
+  return out
+}
+
 export function updateTracks(tracks, faces) {
   const next = tracks.map((track) => ({ ...track }))
   const used = new Set()
@@ -21,14 +38,15 @@ export function updateTracks(tracks, faces) {
     if (best >= 0) {
       used.add(best)
       const face = faces[best]
-      track.cx = track.cx * 0.65 + face.cx * 0.35
-      track.cy = track.cy * 0.65 + face.cy * 0.35
-      track.w = track.w * 0.65 + face.w * 0.35
-      track.h = track.h * 0.65 + face.h * 0.35
+      track.cx = track.cx * 0.5 + face.cx * 0.5
+      track.cy = track.cy * 0.5 + face.cy * 0.5
+      track.w = track.w * 0.7 + face.w * 0.3
+      track.h = track.h * 0.7 + face.h * 0.3
       track.seen += 1
       track.missed = 0
       track.score = face.score
       track.eyes = face.eyes || null
+      track.pts = blendPoints(track.pts, face.pts, 0.55)
     } else {
       track.missed += 1
     }
@@ -36,7 +54,9 @@ export function updateTracks(tracks, faces) {
 
   faces.forEach((face, index) => {
     if (used.has(index)) return
+    trackSeq += 1
     next.push({
+      id: trackSeq,
       cx: face.cx,
       cy: face.cy,
       w: face.w,
@@ -44,7 +64,8 @@ export function updateTracks(tracks, faces) {
       seen: 1,
       missed: 0,
       score: face.score,
-      eyes: face.eyes || null
+      eyes: face.eyes || null,
+      pts: face.pts ? { ...face.pts } : null
     })
   })
 
