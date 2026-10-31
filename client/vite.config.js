@@ -1,4 +1,4 @@
-import { existsSync, cpSync, mkdirSync } from 'fs'
+import { existsSync, cpSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { defineConfig } from 'vite'
@@ -16,6 +16,10 @@ function copyMediapipeWasm() {
   if (!src) return
   mkdirSync(dest, { recursive: true })
   cpSync(src, dest, { recursive: true })
+  const keep = new Set(['vision_wasm_internal.js', 'vision_wasm_internal.wasm'])
+  for (const name of readdirSync(dest)) {
+    if (!keep.has(name)) rmSync(join(dest, name), { force: true })
+  }
 }
 
 export default defineConfig({

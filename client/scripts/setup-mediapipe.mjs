@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -17,4 +17,13 @@ if (!src) {
 
 mkdirSync(dest, { recursive: true })
 cpSync(src, dest, { recursive: true })
-console.log('Copied MediaPipe wasm to public/mediapipe/wasm')
+
+// Keep only the SIMD build — the other two variants are ~22MB of duplicates.
+const keep = new Set([
+  'vision_wasm_internal.js',
+  'vision_wasm_internal.wasm'
+])
+for (const name of readdirSync(dest)) {
+  if (!keep.has(name)) rmSync(join(dest, name), { force: true })
+}
+console.log('Copied MediaPipe wasm (simd only) to public/mediapipe/wasm')

@@ -1,10 +1,12 @@
 import { FaceDetector, FilesetResolver } from '@mediapipe/tasks-vision'
 
+import { apiUrl } from './apiOrigin'
 import { acceptedTracks, aimCrop, approach, groupBox, smoothCrop, updateTracks } from './framing'
 import { getMaskById, loadMaskImage } from './masks'
 
-const WASM_URL = '/mediapipe/wasm'
-const MODEL_URL = '/models/blaze_face_short_range.tflite'
+// Absolute when VITE_SERVER_URL is set (slim APK loads wasm from the server, not from the package).
+const WASM_URL = apiUrl('/mediapipe/wasm')
+const MODEL_URL = apiUrl('/models/blaze_face_short_range.tflite')
 const DETECT_WIDTH = 320
 const OUT_LONG = 960
 
