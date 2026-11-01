@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 
+import { listNativeRingNames, sendNativeCancel, sendNativeRing } from './fcm.js'
+
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const dataDir = join(__dirname, '../data')
 const vapidPath = join(dataDir, 'vapid.json')
@@ -134,6 +136,15 @@ export function attachPush(app) {
     saveSubs(next)
     res.json({ ok: true })
   })
+
+  app.get('/api/push/ring-targets/:roomId', (req, res) => {
+    const roomId = String(req.params.roomId || '')
+    if (!ROOM_RE.test(roomId)) {
+      res.status(400).json({ error: 'Bad room' })
+      return
+    }
+    res.json({ roomId, names: listRingTargets(roomId) })
+  })
 }
 
 async function pushAll(roomId, payload, { skipDevices = [], urgency = 'high', ttl = 45 } = {}) {
@@ -176,27 +187,41 @@ async function pushAll(roomId, payload, { skipDevices = [], urgency = 'high', tt
 
 export async function sendRing(roomId, { fromName, ringId = '', skipDevices = [] } = {}) {
   const safeName = String(fromName || 'Участник').replace(/\s+/g, ' ').slice(0, 24)
-  return pushAll(roomId, {
-    title: 'Входящий звонок',
-    body: `${safeName} звонит. Откройте, чтобы ответить.`,
-    fromName: safeName,
-    roomId,
-    ringId,
-    url: `/room/${roomId}${ringId ? `?ring=${encodeURIComponent(ringId)}` : ''}`,
-    tag: `call-${roomId}`
-  }, { skipDevices, urgency: 'high', ttl: 60 })
+  const [web, native] = await Promise.all([
+    pushAll(roomId, {
+      title: 'Входящий звонок',
+      body: `${safeName} звонит. Нажмите «Ответить».`,
+      fromName: safeName,
+      roomId,
+      ringId,
+      url: `/room/${roomId}${ringId ? `?ring=${encodeURIComponent(ringId)}` : ''}`,
+      tag: `call-${roomId}`,
+      kind: 'call'
+    }, { skipDevices, urgency: 'high', ttl: 90 }),
+    sendNativeRing(roomId, { fromName: safeName, ringId, skipDevices }).catch(() => ({ sent: 0 }))
+  ])
+  return {
+    sent: (web.sent || 0) + (native.sent || 0),
+    total: (web.total || 0) + (native.total || 0),
+    others: (web.others || 0) + (native.sent || 0),
+    native: native.sent || 0
+  }
 }
 
 export async function sendCancelRing(roomId, { ringId = '', skipDevices = [] } = {}) {
-  return pushAll(roomId, {
-    type: 'cancel',
-    cancel: true,
-    roomId,
-    ringId,
-    title: 'Звонок отменён',
-    body: 'Звонок уже завершён',
-    tag: `call-${roomId}`
-  }, { skipDevices, urgency: 'high', ttl: 30 })
+  const [web] = await Promise.all([
+    pushAll(roomId, {
+      type: 'cancel',
+      cancel: true,
+      roomId,
+      ringId,
+      title: 'Звонок отменён',
+      body: 'Звонок уже завершён',
+      tag: `call-${roomId}`
+    }, { skipDevices, urgency: 'high', ttl: 30 }),
+    sendNativeCancel(roomId, { ringId, skipDevices }).catch(() => ({}))
+  ])
+  return web
 }
 
 export async function sendChatPush(roomId, { fromName, text, skipDevices = [] } = {}) {
@@ -211,4 +236,28 @@ export async function sendChatPush(roomId, { fromName, text, skipDevices = [] } 
     url: `/room/${roomId}`,
     tag: `chat-${roomId}`
   }, { skipDevices, urgency: 'normal', ttl: 120 })
+}
+
+/** Public ringable roster for a room (names only — no endpoints). */
+export function listRingTargets(roomId, { skipDevices = [] } = {}) {
+  if (!ROOM_RE.test(String(roomId || ''))) return []
+  const skip = new Set(skipDevices.filter(Boolean))
+  const seen = new Set()
+  const names = []
+  const add = (label, deviceId) => {
+    const key = `${deviceId || ''}|${label}`
+    if (seen.has(key)) return
+    seen.add(key)
+    names.push(label)
+  }
+  for (const item of loadSubs().filter((row) => row.roomId === roomId && !skip.has(row.deviceId))) {
+    const label = String(item.name || 'Участник').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Участник'
+    add(label, item.deviceId)
+    if (names.length >= 24) return names
+  }
+  for (const label of listNativeRingNames(roomId, { skipDevices })) {
+    add(label, '')
+    if (names.length >= 24) break
+  }
+  return names
 }

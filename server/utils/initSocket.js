@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
 
 import { bindSocket, getChat, getSession, lookupUsers, notifyMembers, unbindSocket } from './messenger.js'
-import { sendCancelRing, sendChatPush, sendRing } from './push.js'
+import { listRingTargets, sendCancelRing, sendChatPush, sendRing } from './push.js'
 
 const users = {}
 /** id → socket state, so a reconnecting tab can take its seat back. */
@@ -58,7 +58,8 @@ function getRoomInfo(roomId) {
     waiting,
     callActive: Boolean(room.call?.active),
     inCall: room.call?.inCall || [],
-    media: room.media || {}
+    media: room.media || {},
+    ringTargets: listRingTargets(roomId)
   }
 }
 
@@ -585,6 +586,17 @@ export default function initSocket(socket) {
         }
       }
     })
+    .on('getRingTargets', (_data, ack) => {
+      const done = typeof ack === 'function' ? ack : () => {}
+      const roomId = state.currentRoom
+      if (!roomId || !rooms[roomId]) {
+        done({ names: [] })
+        return
+      }
+      const names = listRingTargets(roomId)
+      done({ names, roomId })
+      socket.emit('ringTargets', { roomId, names })
+    })
     .on('unwatchRoom', (data = {}) => {
       const roomId = typeof data.roomId === 'string' ? data.roomId.trim() : ''
       if (!ROOM_RE.test(roomId)) return
@@ -639,6 +651,7 @@ export default function initSocket(socket) {
           fromName,
           from: state.id
         })
+        const ringTargets = listRingTargets(roomId, { skipDevices: [...inRoomDevices] })
         done({
           sent: Math.max(result.sent || 0, online),
           // reachable = other devices (push subs not in room) + online watchers
@@ -647,7 +660,8 @@ export default function initSocket(socket) {
           participants: room.participants.length,
           pushed: result.sent || 0,
           online,
-          ringId
+          ringId,
+          ringTargets
         })
       } catch (error) {
         console.error('ring failed', error)

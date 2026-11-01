@@ -20,6 +20,8 @@
     "@capacitor/cli": "^7.4.3",
     "@capacitor/core": "^7.4.3",
     "@capacitor/ios": "^7.4.3",
+    "@capacitor/local-notifications": "^7",
+    "@capacitor/push-notifications": "^7",
     "@mediapipe/face_mesh": "^0.4.1633559619",
     "@mediapipe/tasks-vision": "1.0.1",
     "@tensorflow-models/face-landmarks-detection": "^0.0.3",

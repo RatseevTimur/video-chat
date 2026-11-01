@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { BsBell, BsGear, BsPhone, BsX } from 'react-icons/bs'
+import { BsBell, BsGear, BsHouseDoor, BsPhone, BsX } from 'react-icons/bs'
 
 import { isNativeApp } from '../utils/native'
 import { setTrackingEnabled, trackingEnabled } from '../utils/prefs'
 import {
   armCallsFromGesture,
+  canInstallFromHere,
   canPromptInstall,
   helpCallSound,
   isAndroid,
@@ -23,8 +24,10 @@ const APK_URL = '/downloads/video-chat.apk'
 const AppSettings = () => {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [installBusy, setInstallBusy] = useState(false)
   const [soundBusy, setSoundBusy] = useState(false)
   const [note, setNote] = useState('')
+  const [installNote, setInstallNote] = useState('')
   const [sound, setSound] = useState(null)
   const [installable, setInstallable] = useState(() => canPromptInstall())
   const [apkOk, setApkOk] = useState(null)
@@ -34,6 +37,7 @@ const AppSettings = () => {
   const standalone = isStandalone()
   const android = isAndroid()
   const ios = isIos()
+  const onHome = canInstallFromHere()
 
   useEffect(() => {
     if (native) return undefined
@@ -52,12 +56,40 @@ const AppSettings = () => {
     setBusy(true)
     setNote('')
     try {
-      if (!native && !standalone && installable) await promptInstall()
       const result = await armCallsFromGesture(getStoredName() || 'Гость')
-      if (result.ok) setNote(result.hint || 'Звонки включены')
+      if (result.ok) setNote(result.hint || 'Уведомления о звонках включены')
       else setNote(result.message || 'Не удалось')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const placeIcon = async () => {
+    setInstallBusy(true)
+    setInstallNote('')
+    try {
+      if (!onHome) {
+        setInstallNote('Откройте главную страницу (/), затем снова нажмите — иначе ярлык откроет комнату.')
+        return
+      }
+      if (standalone || native) {
+        setInstallNote('Приложение уже установлено. Если ярлык открывает комнату — удалите его и поставьте снова с главной.')
+        return
+      }
+      if (ios) {
+        setInstallNote('iPhone: Поделиться → На экран «Домой». Делайте это с главной страницы, не из комнаты.')
+        return
+      }
+      if (!installable) {
+        setInstallNote('Браузер пока не предлагает ярлык. Откройте главную в Chrome или скачайте APK ниже.')
+        return
+      }
+      const ok = await promptInstall()
+      setInstallNote(ok
+        ? 'Ярлык создан — он открывает главную. Звонки включите кнопкой ниже.'
+        : 'Установка отменена.')
+    } finally {
+      setInstallBusy(false)
       setInstallable(canPromptInstall())
     }
   }
@@ -130,38 +162,50 @@ const AppSettings = () => {
             </div>
 
             {native && (
-              <p className="settings-hint">
-                Режим APK: UI внутри приложения, без адресной строки. Если экран пустой или «непонятный» — проверьте, что сервер запущен и телефон в той же Wi‑Fi. В настройках не должно быть вкладки Chrome.
-              </p>
-            )}
-
-            {!native && android && (
               <div className="settings-block">
-                <a className="btn btn-success" href={APK_URL} download="video-chat.apk">
-                  <BsPhone /> Скачать APK
-                </a>
-                {apkOk === false && <p className="settings-hint">Файл APK на сервере недоступен.</p>}
                 <p className="settings-hint">
-                  Установите APK → откройте иконку «Video Chat» (не вкладку Chrome). Так появляется настоящее приложение без адресной строки.
+                  Режим APK: UI внутри приложения. Для входящего поверх блокировки нужен Firebase: файл google-services.json в android/app и FCM_SERVER_KEY на сервере.
                 </p>
               </div>
             )}
 
-            {!native && ios && !standalone && (
+            {!native && (
               <div className="settings-block">
+                <p className="settings-label">Приложение на телефон</p>
+                {android && (
+                  <a className="btn btn-success" href={APK_URL} download="video-chat.apk">
+                    <BsPhone /> Скачать APK
+                  </a>
+                )}
+                {apkOk === false && <p className="settings-hint">Файл APK на сервере недоступен.</p>}
+                {!standalone && !native && (
+                  <button type="button" className="btn btn-outline" disabled={installBusy} onClick={placeIcon}>
+                    <BsHouseDoor /> {installBusy ? '…' : 'Ярлык на экран (главная)'}
+                  </button>
+                )}
                 <p className="settings-hint">
-                  iPhone: Поделиться → На экран «Домой», затем откройте значок. Отдельного App Store IPA пока нет.
+                  Ярлык и APK всегда открывают главную, не комнату. Если старый ярлык ведёт в комнату — удалите его и поставьте снова отсюда.
                 </p>
+                {ios && !standalone && (
+                  <p className="settings-hint">
+                    iPhone: Поделиться → На экран «Домой» (только с главной). Полноценный входящий как в WhatsApp на iOS — отдельный этап (CallKit).
+                  </p>
+                )}
+                {installNote && <p className="settings-hint">{installNote}</p>}
               </div>
             )}
 
             <div className="settings-block">
+              <p className="settings-label">Звонки</p>
               <button type="button" className="btn btn-success" disabled={busy} onClick={arm}>
-                <BsBell /> {busy ? '…' : 'Включить звонки'}
+                <BsBell /> {busy ? '…' : 'Включить уведомления о звонках'}
               </button>
               <button type="button" className="btn btn-outline" disabled={soundBusy} onClick={testSound}>
                 {soundBusy ? '…' : 'Проверить звук уведомлений'}
               </button>
+              <p className="settings-hint">
+                Это разрешение на уведомления, а не установка приложения. Без него входящий при закрытом приложении не дойдёт.
+              </p>
               {note && <p className="settings-hint">{note}</p>}
             </div>
 

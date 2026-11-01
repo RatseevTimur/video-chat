@@ -69,13 +69,12 @@ const InstallHint = ({ compact = false, floating = false }) => {
     }
   }
 
+  // Install is never offered here — only notification arming (home-screen install lives in settings).
   const label = busy
     ? '…'
     : armed
-      ? 'Обновить звонки'
-      : (native || standalone)
-        ? 'Включить звонки'
-        : (isIos() ? 'На экран + звонки' : (installable ? 'Установить и звонки' : 'Включить звонки'))
+      ? 'Обновить уведомления'
+      : 'Включить уведомления о звонках'
 
   return (
     <div className={[

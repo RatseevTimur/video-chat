@@ -30,7 +30,15 @@ export function canPromptInstall() {
   return Boolean(installPrompt)
 }
 
+/** Never install from /room/… — Chrome would pin that room as the app start URL. */
+export function canInstallFromHere() {
+  if (typeof window === 'undefined') return false
+  const path = window.location.pathname || '/'
+  return path === '/' || path === '/guest'
+}
+
 export async function promptInstall() {
+  if (!canInstallFromHere()) return false
   if (!installPrompt) return false
   const pending = installPrompt
   installPrompt = null
@@ -40,13 +48,20 @@ export async function promptInstall() {
   return choice?.outcome === 'accepted'
 }
 
-/** Install dialog first (needs the tap), then notification permission — same gesture. */
-export function beginPlaceIcon() {
-  const installed = promptInstall()
+/** Notification permission only — does NOT install the PWA (that must stay on home). */
+export function beginNotifyPermission() {
   const permission = ('Notification' in window)
     ? Notification.requestPermission().catch(() => 'denied')
     : Promise.resolve('unsupported')
-  return { permission, installed }
+  return { permission }
+}
+
+/** @deprecated use beginNotifyPermission + promptInstall separately */
+export function beginPlaceIcon() {
+  return {
+    ...beginNotifyPermission(),
+    installed: Promise.resolve(false)
+  }
 }
 
 export function isIos() {
@@ -74,12 +89,14 @@ export async function helpCallSound() {
   const steps = isIos()
     ? [
         'Откройте Настройки → Уведомления → Video Chat (или Safari / Chrome).',
-        'Включите уведомления и звук, выключите беззвучный режим телефона.'
+        'Включите уведомления и звук, выключите беззвучный режим телефона.',
+        'На iPhone полноэкранный входящий как в WhatsApp пока недоступен (нужен CallKit).'
       ]
     : [
         'Сейчас появится тестовое уведомление «Проверка звонка».',
-        'Долгое нажатие по нему → Настройки / Оповещение.',
-        'Режим «Оповещение» (не «Без звука») + звук и вибрация.'
+        'Долгое нажатие по нему → Настройки канала / Оповещение.',
+        'Режим «Оповещение» (не «Без звука») + звук и вибрация — иначе на блокировке тихо.',
+        'Для входящего поверх блокировки лучше установить APK (не только вкладку Chrome).'
       ]
 
   let probed = false
@@ -321,6 +338,10 @@ export async function enableCallAlerts(roomId, name) {
     writeRooms(rooms)
     socket.emit('watchRoom', { roomId, deviceId: getDeviceId() })
     probeCallAlert().catch(() => {})
+    try {
+      const { syncNativePushRooms } = await import('./nativePush.js')
+      syncNativePushRooms().catch(() => {})
+    } catch { /* web */ }
     return { ok: true, hint: callSoundHint() }
   } catch (error) {
     const detail = String(error?.message || error || '')
@@ -364,10 +385,13 @@ export async function enableAllRoomAlerts(name) {
   return last.ok ? { ok: true, count: ids.length } : last
 }
 
-/** One tap: offer install + allow notifications + arm every saved room. */
+/**
+ * Allow notifications + arm every saved room.
+ * Does NOT open the PWA install dialog (install only from lobby settings on `/`).
+ */
 export async function armCallsFromGesture(name) {
-  const pending = beginPlaceIcon()
-  const [permission] = await Promise.all([pending.permission, pending.installed])
+  const { permission: permPromise } = beginNotifyPermission()
+  const permission = await permPromise
   if (permission !== 'granted' && Notification.permission !== 'granted') {
     if (isIos() && !isStandalone()) {
       return fail(

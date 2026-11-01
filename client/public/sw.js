@@ -1,7 +1,10 @@
 /* Push worker: call alerts when the site is closed/minimized. */
 
 const rings = new Map()
-const VIBRATE = [600, 200, 600, 200, 600, 400, 900]
+/** Longer / sharper pattern so lock-screen alerts feel like a call, not a chat ping. */
+const VIBRATE = [800, 180, 800, 180, 800, 180, 1200, 400, 800]
+const CALL_PULSES = 12
+const CALL_PULSE_MS = 1800
 
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
@@ -30,8 +33,8 @@ async function closeTagged(roomId) {
 async function showCallNotice(payload, pulse) {
   // Stable base tag + pulse suffix so Android re-alerts without stacking forever.
   const tag = pulse === 0 ? `call-${payload.roomId}` : `call-${payload.roomId}-${pulse}`
-  await self.registration.showNotification(payload.title, {
-    body: payload.body,
+  await self.registration.showNotification(payload.title || 'Входящий звонок', {
+    body: payload.body || 'Откройте, чтобы ответить',
     icon: '/icons/icon-192.png',
     badge: '/icons/icon-192.png',
     tag,
@@ -44,7 +47,8 @@ async function showCallNotice(payload, pulse) {
       url: payload.url,
       roomId: payload.roomId,
       ringId: payload.ringId || '',
-      pulse
+      pulse,
+      kind: 'call'
     },
     actions: [
       { action: 'accept', title: 'Ответить' },
@@ -115,11 +119,11 @@ self.addEventListener('push', (event) => {
     const token = { stop: false }
     rings.set(roomId, token)
 
-    for (let i = 0; i < 8 && !token.stop; i += 1) {
+    for (let i = 0; i < CALL_PULSES && !token.stop; i += 1) {
       if (i > 0) await closeTagged(roomId)
       await showCallNotice(payload, i)
-      if (i < 7 && !token.stop) {
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+      if (i < CALL_PULSES - 1 && !token.stop) {
+        await new Promise((resolve) => setTimeout(resolve, CALL_PULSE_MS))
       }
     }
     rings.delete(roomId)

@@ -9,7 +9,10 @@ import {
   BsCopy,
   BsMicFill,
   BsMicMuteFill,
-  BsTelephone
+  BsPersonPlus,
+  BsShare,
+  BsTelephone,
+  BsX
 } from 'react-icons/bs'
 import { MdFlipCameraIos } from 'react-icons/md'
 import { FiPhoneOff } from 'react-icons/fi'
@@ -71,6 +74,9 @@ const Room = () => {
   const [roomInfo, setRoomInfo] = useState(null)
   const [error, setError] = useState('')
   const [copied, setCopied] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const [ringableNames, setRingableNames] = useState([])
+  const [ringHint, setRingHint] = useState('')
   const [maskId, setMaskId] = useState(() => loadFx().mask)
   const [background, setBackground] = useState(() => loadFx().background)
   const [gestures, setGestures] = useState(() => loadFx().gestures)
@@ -324,11 +330,17 @@ const Room = () => {
         // Keep a camera error visible; clear stale room errors.
         setError((prev) => (mediaReadyRef.current ? '' : prev))
         if (info?.media) setPeerMedia(info.media)
+        if (Array.isArray(info?.ringTargets)) setRingableNames(info.ringTargets)
+        else socket.emit('getRingTargets', {})
         meshWith(info?.participants)
         if (mediaReadyRef.current) {
           socket.emit('mediaReady', { session: sessionRef.current })
           socket.emit('mediaState', { audio: audioOnRef.current, video: videoOnRef.current })
         }
+      },
+      ringTargets: ({ names, roomId: id }) => {
+        if (id && id !== roomId) return
+        if (Array.isArray(names)) setRingableNames(names)
       },
       peerMediaState: ({ userId, audio, video }) => {
         if (!userId) return
@@ -732,11 +744,37 @@ const Room = () => {
     if (next) setUnread(0)
   }
 
+  const roomLink = () => `${window.location.origin}/room/${roomId}`
+
+  const refreshRingTargets = useCallback(() => {
+    socket.emit('getRingTargets', {}, (res) => {
+      if (Array.isArray(res?.names)) setRingableNames(res.names)
+    })
+  }, [])
+
   const copyLink = async () => {
-    const link = `${window.location.origin}/room/${roomId}`
+    const link = roomLink()
     try { await navigator.clipboard.writeText(link) } catch { /* ignore */ }
     setCopied(true)
     setTimeout(() => setCopied(false), 1600)
+  }
+
+  const shareInvite = async () => {
+    const link = roomLink()
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: 'Video Chat',
+          text: 'Присоединяйтесь к видеозвонку. Откройте ссылку и разрешите уведомления — тогда вам смогут позвонить.',
+          url: link
+        })
+        return
+      }
+    } catch {
+      // fall through to copy
+    }
+    await copyLink()
+    flashNoteRef.current?.('Ссылка скопирована — отправьте человеку')
   }
 
   const others = (roomInfo?.participants || []).filter((id) => id !== localId)
@@ -772,6 +810,7 @@ const Room = () => {
     const result = await armCallsFromGesture(getStoredName() || 'Гость')
     if (result.ok) {
       setAlertsOn(true)
+      refreshRingTargets()
       flashNote(result.hint || 'Звонки вкл — проверьте звук уведомления')
       return
     }
@@ -842,21 +881,28 @@ const Room = () => {
       setActiveRingId(res?.ringId || '')
       const others = Number(res?.others || 0)
       const participants = Number(res?.participants || 1)
+      const names = Array.isArray(res?.ringTargets) ? res.ringTargets : []
+      if (names.length) setRingableNames(names)
       setRingTargets(others)
       if (others > 0) {
-        flashNote(`Звоним · ${others}`)
+        const who = names.length ? names.slice(0, 3).join(', ') + (names.length > 3 ? '…' : '') : ''
+        setRingHint(who ? `Услышат: ${who}` : 'Ожидаем ответ')
+        flashNote(`Звоним ${others} ${others === 1 ? 'устройству' : 'устройствам'}${who ? ` · ${who}` : ''}`)
         return
       }
       if (participants > 1) {
-        // Everyone we know about is already here.
         setRinging(false)
         stopRingback()
+        setRingHint('')
         flashNote('Все уже в комнате')
         return
       }
-      // Alone and nobody else has enabled alerts for this room yet — keep ringing,
-      // and tell the user what to do on the other phone.
-      flashNote('Звоним… На другом телефоне откройте эту комнату и нажмите 🔔 — звонок дойдёт')
+      setRinging(false)
+      stopRingback()
+      setRingHint('')
+      socket.emit('cancelRing', {})
+      flashNote('Некому звонить — нажмите «Пригласить», человек откроет ссылку и 🔔')
+      setInviteOpen(true)
     })
   }
 
@@ -885,7 +931,7 @@ const Room = () => {
           <h1>{roomInfo?.participantCount || 1}</h1>
         </div>
         <div className="meet-header-actions">
-          <button type="button" className={`btn btn-small ${alertsOn ? 'btn-success' : 'btn-outline'}`} onClick={toggleAlerts} aria-label={alertsOn ? 'Звонки включены' : 'Включить звонки'}>
+          <button type="button" className={`btn btn-small ${alertsOn ? 'btn-success' : 'btn-outline'}`} onClick={toggleAlerts} aria-label={alertsOn ? 'Звонки включены' : 'Включить звонки'} title={alertsOn ? 'Звонки включены' : 'Включить уведомления о звонках'}>
             {alertsOn ? <BsBellFill /> : <BsBell />}
           </button>
           <button
@@ -893,9 +939,12 @@ const Room = () => {
             className={`btn btn-small ${ringing ? 'btn-danger is-ringing' : 'btn-primary'}`}
             onClick={ringSubscribers}
             aria-label={ringing ? 'Отменить звонок' : 'Позвонить'}
-            title={ringing ? 'Отменить звонок' : 'Позвонить'}
+            title={ringing ? 'Отменить звонок' : (ringableNames.length ? `Позвонить · ${ringableNames.length}` : 'Позвонить')}
           >
             {ringing ? <FiPhoneOff /> : <BsTelephone />}
+          </button>
+          <button type="button" className="btn btn-outline btn-small" onClick={() => { setInviteOpen(true); refreshRingTargets() }} aria-label="Пригласить" title="Пригласить в комнату">
+            <BsPersonPlus />
           </button>
           <button type="button" className="btn btn-success btn-small" onClick={copyLink} aria-label={copied ? 'Ссылка скопирована' : 'Скопировать ссылку'}>
             {copied ? <BsCheck /> : <BsCopy />}
@@ -903,13 +952,57 @@ const Room = () => {
         </div>
       </header>
 
+      {ringableNames.length > 0 && !ringing && (
+        <p className="ringable-strip" title={ringableNames.join(', ')}>
+          Услышат звонок: {ringableNames.slice(0, 4).join(', ')}{ringableNames.length > 4 ? '…' : ''}
+        </p>
+      )}
+      {!ringableNames.length && !ringing && link === 'online' && (
+        <p className="ringable-strip is-empty">
+          Пока никто не подписан на звонки — пригласите по ссылке
+        </p>
+      )}
+
+      {inviteOpen && (
+        <div className="invite-overlay" role="dialog" aria-modal="true" aria-labelledby="invite-title" onClick={() => setInviteOpen(false)}>
+          <div className="invite-sheet" onClick={(event) => event.stopPropagation()}>
+            <header className="effects-head">
+              <strong id="invite-title">Пригласить в комнату</strong>
+              <button type="button" className="icon-btn" aria-label="Закрыть" onClick={() => setInviteOpen(false)}><BsX /></button>
+            </header>
+            <p className="settings-hint">
+              Отправьте ссылку → человек открывает → нажимает 🔔 (уведомления) → появится в списке «Услышат звонок». Потом можно звонить.
+            </p>
+            <p className="invite-link">{roomLink()}</p>
+            <div className="invite-actions">
+              <button type="button" className="btn btn-success" onClick={shareInvite}>
+                <BsShare /> Поделиться
+              </button>
+              <button type="button" className="btn btn-outline" onClick={async () => { await copyLink(); flashNoteRef.current?.('Ссылка скопирована') }}>
+                <BsCopy /> {copied ? 'Скопировано' : 'Копировать'}
+              </button>
+            </div>
+            {ringableNames.length > 0 ? (
+              <p className="settings-hint">Уже услышат: {ringableNames.join(', ')}</p>
+            ) : (
+              <p className="settings-hint">Пока список пуст — дождитесь, пока человек откроет ссылку и включит 🔔.</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {ringing && (
         <div className="outgoing-call">
           <div className="outgoing-call-pulse" aria-hidden />
           <div className="outgoing-call-card">
             <p className="outgoing-call-label">Исходящий звонок</p>
-            <h2>Звоним{ringTargets ? ` · ${ringTargets}` : '…'}</h2>
-            <p className="outgoing-call-hint">Ожидаем ответ</p>
+            <h2>{ringTargets > 0 ? `Звоним · ${ringTargets}` : 'Некому звонить'}</h2>
+            <p className="outgoing-call-hint">{ringHint || 'Ожидаем ответ'}</p>
+            {ringTargets === 0 && (
+              <button type="button" className="btn btn-success" onClick={() => { setInviteOpen(true); refreshRingTargets() }}>
+                <BsPersonPlus /> Пригласить
+              </button>
+            )}
             <button type="button" className="btn btn-danger" onClick={cancelOutgoingRing}>
               <FiPhoneOff /> Отменить
             </button>

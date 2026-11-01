@@ -21,6 +21,7 @@ import Room from './components/Room'
 import RoomManager from './components/RoomManager'
 import { enterRoom, goAppBack, resolveTreeBack } from './utils/appNav'
 import { isNativeApp } from './utils/native'
+import { initNativePush } from './utils/nativePush'
 import PeerConnection from './utils/PeerConnection'
 import { resubscribeSaved, watchSavedRooms } from './utils/push'
 import { createRingtone, startVibrate, stopVibrate } from './utils/ringtone'
@@ -112,6 +113,7 @@ export default function App() {
     if (navigator.serviceWorker?.ready) {
       navigator.serviceWorker.ready.then(() => resubscribeSaved(getStoredName() || 'Гость')).catch(() => {})
     }
+    initNativePush().catch(() => {})
     return () => {
       socket.off('connect', joinWatch)
       ringtoneRef.current?.stop()

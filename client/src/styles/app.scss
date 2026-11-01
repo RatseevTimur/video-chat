@@ -259,6 +259,14 @@
   .btn { align-self: stretch; justify-content: center; }
 }
 
+.settings-label {
+  margin: 0 0 0.15rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+
 .settings-hint {
   margin: 0;
   font-size: 0.78rem;
@@ -389,6 +397,75 @@
 
   p { margin: 0.35rem 0 0; }
   button { margin-left: 0.5rem; }
+}
+
+.ringable-strip {
+  margin: 0 0.7rem 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(52, 199, 89, 0.12);
+  color: #b7f0c6;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  flex: 0 0 auto;
+
+  &.is-empty {
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.65);
+  }
+}
+
+.invite-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.invite-sheet {
+  width: min(480px, 100%);
+  background: #1f2329;
+  border-radius: 18px 18px 0 0;
+  padding: 0.9rem 1rem 1.2rem;
+  box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.invite-link {
+  margin: 0.7rem 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 0.82rem;
+  word-break: break-all;
+}
+
+.invite-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.55rem;
+
+  .btn { flex: 1 1 140px; justify-content: center; }
+}
+
+.room-alert-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  vertical-align: middle;
+
+  &.is-on {
+    background: rgba(52, 199, 89, 0.22);
+    color: #b7f0c6;
+  }
 }
 
 /* Status banners sit in document flow under the header — never over video tiles. */

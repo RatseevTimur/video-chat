@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url'
 
 import { attachApi } from './utils/api.js'
 import initSocket from './utils/initSocket.js'
+import { attachNativePush } from './utils/fcm.js'
 import { attachPush } from './utils/push.js'
 import { getPort, printBanner } from './utils/messenger.js'
 import { ensureTls } from './utils/tls.js'
@@ -66,6 +67,7 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '256kb' }))
 attachApi(app)
 attachPush(app)
+attachNativePush(app)
 
 app.get('/api/ice', (_req, res) => {
   // STUN + public TURN so phones on cellular can see each other (pure STUN often fails).

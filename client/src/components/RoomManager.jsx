@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { enterRoom } from '../utils/appNav'
 import { syncDeviceNow } from '../utils/deviceSync'
-import { armCallsFromGesture, getDeviceId } from '../utils/push'
+import { alertsEnabled, armCallsFromGesture, getDeviceId } from '../utils/push'
 import { forgetRoom, listRooms, rememberRoom } from '../utils/rooms'
 import { getStoredName, setStoredName } from '../utils/session'
 import socket from '../utils/socket'
@@ -140,11 +140,15 @@ const RoomManager = () => {
         <div className="room-list">
           {rooms.map((room) => {
             const unread = Number(unreadMap[room.id] || getUnread(room.id) || 0)
+            const callsOn = alertsEnabled(room.id)
             return (
               <div key={room.id} className="room-row-wrap">
                 <button type="button" className="room-row" onClick={() => openRoom(room)}>
                   <span className="room-row-main">
                     <strong>{room.family ? 'Семья' : room.title}</strong>
+                    <span className={`room-alert-badge ${callsOn ? 'is-on' : ''}`}>
+                      {callsOn ? 'звонки вкл' : 'звонки выкл'}
+                    </span>
                     {unread > 0 && <span className="room-unread">{unread > 99 ? '99+' : unread}</span>}
                   </span>
                   <span className="room-id">{room.id}</span>

@@ -16,6 +16,13 @@
         "camera",
         "photos"
       ]
+    },
+    "PushNotifications": {
+      "presentationOptions": ["badge", "sound", "alert"]
+    },
+    "LocalNotifications": {
+      "smallIcon": "ic_launcher",
+      "iconColor": "#1a73e8"
     }
   }
 }
